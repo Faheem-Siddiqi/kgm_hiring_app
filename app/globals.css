@@ -70,7 +70,29 @@
   border-color: var(--border);
 }
 
+html {
+  transition:
+    background-color 300ms ease,
+    color 300ms ease;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
+  transition:
+    background-color 300ms ease,
+    color 300ms ease;
+}
+
+button,
+input,
+[data-slot="card"],
+[data-slot="badge"],
+[data-slot="progress"] {
+  transition:
+    background-color 300ms ease,
+    border-color 300ms ease,
+    color 300ms ease,
+    box-shadow 300ms ease,
+    opacity 200ms ease;
 }
