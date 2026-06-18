@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
-import { ArrowRight, CheckCircle2, Clock3, FileText, ListChecks } from "lucide-react";
+import { useState, useSyncExternalStore } from "react";
+import { ArrowRight, CheckCircle2, Clock3, FileText, ListChecks, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { assessmentSections } from "@/features/test/assessment-data";
@@ -35,6 +43,8 @@ function subscribeToAnswers(onStoreChange: () => void) {
 }
 
 export function TestOverview() {
+  const [showCompletionDialog, setShowCompletionDialog] = useState(false);
+  const [isOpeningSection, setIsOpeningSection] = useState(false);
   const answersSnapshot = useSyncExternalStore(
     subscribeToAnswers,
     readStoredAnswersSnapshot,
@@ -51,7 +61,13 @@ export function TestOverview() {
   const overallProgress = Math.round((answeredQuestions / totalQuestions) * 100);
 
   return (
-    <section className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[1.35fr_0.75fr]">
+    <>
+      {isOpeningSection ? (
+        <div className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-muted">
+          <div className="h-full w-1/2 animate-pulse rounded-r-full bg-primary" />
+        </div>
+      ) : null}
+      <section className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[1.35fr_0.75fr]">
       <div className="space-y-6">
         <div className="space-y-4">
           <Badge variant="secondary" className="gap-2">
@@ -96,6 +112,7 @@ export function TestOverview() {
                   className="block rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                   href={`/test/${section.slug}`}
                   key={section.slug}
+                  onClick={() => setIsOpeningSection(true)}
                 >
                   <Card className="shadow-none hover:border-ring/60 hover:bg-muted/20">
                     <CardHeader className="p-4 pb-3">
@@ -137,8 +154,13 @@ export function TestOverview() {
                   Submit becomes meaningful once all answers are connected to the backend.
                 </p>
               </div>
-              <Button className="w-full sm:w-auto" disabled={answeredQuestions < totalQuestions}>
+              <Button
+                className="w-full sm:w-auto"
+                disabled={answeredQuestions < totalQuestions}
+                onClick={() => setShowCompletionDialog(true)}
+              >
                 Submit Test
+                <Send className="size-4" />
               </Button>
             </div>
           </CardContent>
@@ -172,6 +194,32 @@ export function TestOverview() {
           </CardContent>
         </Card>
       </aside>
-    </section>
+      </section>
+
+      <Dialog open={showCompletionDialog} onOpenChange={setShowCompletionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-emerald-600 text-white">
+              <CheckCircle2 className="size-5" />
+            </div>
+            <DialogTitle>Test submitted</DialogTitle>
+            <DialogDescription>
+              Your assessment preview is complete. Saved answers remain on this
+              device until the backend submission endpoint is connected.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/30 p-4 text-sm">
+            <span className="font-medium">{answeredQuestions}</span> of{" "}
+            <span className="font-medium">{totalQuestions}</span> questions have
+            saved answers.
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShowCompletionDialog(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

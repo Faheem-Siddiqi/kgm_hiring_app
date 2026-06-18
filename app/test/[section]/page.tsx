@@ -1,10 +1,17 @@
 import { notFound } from "next/navigation";
 import {
+  assessmentSections,
   getNextSectionSlug,
   getPreviousSectionSlug,
   getSectionBySlug,
 } from "@/features/test/assessment-data";
 import { SectionRunner } from "@/features/test/components/section-runner";
+
+export function generateStaticParams() {
+  return assessmentSections.map((section) => ({
+    section: section.slug,
+  }));
+}
 
 export default async function SectionPage({
   params,

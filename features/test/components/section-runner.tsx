@@ -40,6 +40,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { AssessmentSection } from "@/features/test/assessment-data";
 import {
   getAnsweredCount,
+  getTotalQuestionCount,
   readStoredAnswersSnapshot,
   writeStoredAnswers,
 } from "@/features/test/assessment-storage";
@@ -84,6 +85,8 @@ export function SectionRunner({
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showWindowWarning, setShowWindowWarning] = useState(false);
+  const [showCompletionDialog, setShowCompletionDialog] = useState(false);
+  const [isChangingSection, setIsChangingSection] = useState(false);
   const windowWarningQueuedRef = useRef(false);
   const sectionDurationSeconds = getSectionDurationSeconds(section.time);
   const [timeLeftSeconds, setTimeLeftSeconds] = useState(sectionDurationSeconds);
@@ -111,6 +114,8 @@ export function SectionRunner({
   const timerProgress = sectionDurationSeconds
     ? Math.round((timeLeftSeconds / sectionDurationSeconds) * 100)
     : 0;
+  const totalQuestionCount = getTotalQuestionCount();
+  const totalAnsweredCount = getAnsweredCount(answers, Object.keys(answers));
 
   useEffect(() => {
     function showWarning() {
@@ -166,6 +171,23 @@ export function SectionRunner({
     return () => window.clearInterval(intervalId);
   }, [section.slug, sectionDurationSeconds]);
 
+  useEffect(() => {
+    setCurrentIndex(0);
+    setIsChangingSection(false);
+  }, [section.slug]);
+
+  useEffect(() => {
+    router.prefetch("/test");
+
+    if (previousSectionSlug) {
+      router.prefetch(`/test/${previousSectionSlug}`);
+    }
+
+    if (nextSectionSlug) {
+      router.prefetch(`/test/${nextSectionSlug}`);
+    }
+  }, [nextSectionSlug, previousSectionSlug, router]);
+
   function updateAnswer(questionId: string, value: string) {
     if (isTimeUp) {
       return;
@@ -203,8 +225,17 @@ export function SectionRunner({
     setShowWindowWarning(false);
   }
 
+  function submitAssessment() {
+    setShowCompletionDialog(true);
+  }
+
   return (
     <>
+      {isChangingSection ? (
+        <div className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-muted">
+          <div className="h-full w-1/2 animate-pulse rounded-r-full bg-primary" />
+        </div>
+      ) : null}
       <main
         className="min-h-svh select-none bg-background px-4 py-20 text-foreground sm:px-6 lg:px-8"
         onContextMenu={preventContentCopy}
@@ -397,13 +428,16 @@ export function SectionRunner({
                   {isLastQuestion ? (
                     nextSectionSlug ? (
                       <Button asChild>
-                        <Link href={`/test/${nextSectionSlug}`}>
+                        <Link
+                          href={`/test/${nextSectionSlug}`}
+                          onClick={() => setIsChangingSection(true)}
+                        >
                           Next section
                           <ArrowRight className="size-4" />
                         </Link>
                       </Button>
                     ) : (
-                      <Button>
+                      <Button onClick={submitAssessment}>
                         Submit Test
                         <Send className="size-4" />
                       </Button>
@@ -421,7 +455,10 @@ export function SectionRunner({
 
                 {previousSectionSlug ? (
                   <Button asChild variant="ghost">
-                    <Link href={`/test/${previousSectionSlug}`}>
+                    <Link
+                      href={`/test/${previousSectionSlug}`}
+                      onClick={() => setIsChangingSection(true)}
+                    >
                       <ArrowLeft className="size-4" />
                       Previous section
                     </Link>
@@ -470,6 +507,34 @@ export function SectionRunner({
           </DialogHeader>
           <DialogFooter>
             <Button onClick={leaveTimedOutSection}>Back to overview</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCompletionDialog} onOpenChange={setShowCompletionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-emerald-600 text-white">
+              <CheckCircle2 className="size-5" />
+            </div>
+            <DialogTitle>Test submitted</DialogTitle>
+            <DialogDescription>
+              Your assessment preview is complete. Saved answers remain on this
+              device until the backend submission endpoint is connected.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/30 p-4 text-sm">
+            <span className="font-medium">{totalAnsweredCount}</span> of{" "}
+            <span className="font-medium">{totalQuestionCount}</span> questions
+            have saved answers.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCompletionDialog(false)}>
+              Review answers
+            </Button>
+            <Button onClick={() => router.replace("/test")}>
+              Back to overview
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
