@@ -15,18 +15,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      suppressHydrationWarning
-    >
-      <body className="min-h-svh bg-background font-sans text-foreground antialiased">
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className="min-h-svh bg-background font-sans text-foreground antialiased"
+        suppressHydrationWarning
+      >
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
           enableSystem
-          disableTransitionOnChange
         >
-          <div className="fixed right-4 top-4 z-50">
+          <div className="fixed right-4 top-4 z-50" suppressHydrationWarning>
             <ThemeToggle />
           </div>
           {children}

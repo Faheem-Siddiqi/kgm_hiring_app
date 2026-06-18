@@ -1,7 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -22,7 +21,13 @@ export function ThemeToggle() {
 
   if (!mounted) {
     return (
-      <Button variant="outline" size="sm" disabled>
+      <Button
+        variant="outline"
+        size="sm"
+        className="min-w-28 transition-all duration-300"
+        disabled
+        suppressHydrationWarning
+      >
         Theme
       </Button>
     );
@@ -51,6 +56,7 @@ export function ThemeToggle() {
       className="min-w-28 transition-all duration-300"
       onClick={handleThemeChange}
       disabled={isSwitching}
+      suppressHydrationWarning
     >
       <Icon className="size-4" />
       {isSwitching ? "Switching" : "Theme"}
