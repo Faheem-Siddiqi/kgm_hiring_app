@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
-import { ArrowRight, CheckCircle2, Clock3, FileText, ListChecks, Send } from "lucide-react";
+import {
+  ArrowRight,
+  BarChart3,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  ListChecks,
+  Send,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { enterAssessmentFullscreen } from "@/features/test/assessment-fullscreen";
 import { assessmentSections } from "@/features/test/assessment-data";
 import {
   getAnsweredCount,
@@ -83,6 +92,12 @@ export function TestOverview() {
               frontend preview and progress updates as questions are completed.
             </p>
           </div>
+          <Button asChild variant="outline" className="w-fit">
+            <Link href="/admin">
+              <BarChart3 className="size-4" />
+              Admin dashboard
+            </Link>
+          </Button>
         </div>
 
         <Card>
@@ -112,7 +127,10 @@ export function TestOverview() {
                   className="block rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                   href={`/test/${section.slug}`}
                   key={section.slug}
-                  onClick={() => setIsOpeningSection(true)}
+                  onClick={() => {
+                    setIsOpeningSection(true);
+                    void enterAssessmentFullscreen();
+                  }}
                 >
                   <Card className="shadow-none hover:border-ring/60 hover:bg-muted/20">
                     <CardHeader className="p-4 pb-3">

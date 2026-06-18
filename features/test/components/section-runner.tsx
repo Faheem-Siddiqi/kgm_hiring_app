@@ -39,6 +39,15 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  createViolation,
+  saveAssessmentResult,
+} from "@/features/test/admin-storage";
+import {
+  enterAssessmentFullscreen,
+  exitAssessmentFullscreen,
+  getAssessmentFullscreenElement,
+} from "@/features/test/assessment-fullscreen";
+import {
   assessmentSections,
   type AssessmentSection,
 } from "@/features/test/assessment-data";
@@ -91,9 +100,20 @@ export function SectionRunner({
   const [showWindowWarning, setShowWindowWarning] = useState(false);
   const [showCompletionDialog, setShowCompletionDialog] = useState(false);
   const [isChangingSection, setIsChangingSection] = useState(false);
+  const [violationCount, setViolationCount] = useState(0);
+  const [lastViolationNumber, setLastViolationNumber] = useState<number | null>(
+    null,
+  );
+  const [submissionStatus, setSubmissionStatus] = useState<
+    "Submitted" | "Auto submitted"
+  >("Submitted");
   const windowWarningQueuedRef = useRef(false);
   const sectionDurationSeconds = getSectionDurationSeconds(section.time);
+  const timerStorageKey = `kgm-hiring-assessment-timer-${section.slug}`;
   const [timeLeftSeconds, setTimeLeftSeconds] = useState(sectionDurationSeconds);
+  const isStoppingAssessmentRef = useRef(false);
+  const timerEndAtRef = useRef<number | null>(null);
+  const answersRef = useRef<Record<string, string>>({});
   const answersSnapshot = useSyncExternalStore(
     subscribeToAnswers,
     readStoredAnswersSnapshot,
@@ -122,6 +142,7 @@ export function SectionRunner({
   const isFirstQuestion = currentIndex === 0;
   const isLastQuestion = currentIndex === section.questions.length - 1;
   const isTimeUp = timeLeftSeconds <= 0;
+  const isLastMinute = timeLeftSeconds > 0 && timeLeftSeconds <= 60;
   const timerProgress = sectionDurationSeconds
     ? Math.round((timeLeftSeconds / sectionDurationSeconds) * 100)
     : 0;
@@ -129,8 +150,48 @@ export function SectionRunner({
   const totalAnsweredCount = getAnsweredCount(answers, allQuestionIds);
 
   useEffect(() => {
-    function showWarning() {
+    answersRef.current = answers;
+  }, [answers]);
+
+  function submitAssessment(status: "Submitted" | "Auto submitted") {
+    saveAssessmentResult({
+      answers: answersRef.current,
+      status,
+    });
+    setSubmissionStatus(status);
+    setShowCompletionDialog(true);
+  }
+
+  useEffect(() => {
+    void enterAssessmentFullscreen().then((enteredFullscreen) => {
+      if (!enteredFullscreen) {
+        setShowWindowWarning(true);
+        windowWarningQueuedRef.current = true;
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    function showWarning(reason = "Window or fullscreen switch detected") {
+      if (isStoppingAssessmentRef.current) {
+        return;
+      }
+
       if (windowWarningQueuedRef.current) {
+        return;
+      }
+
+      const violations = createViolation(section.slug, reason);
+      const nextViolationCount = violations.length;
+
+      setViolationCount(nextViolationCount);
+      setLastViolationNumber(nextViolationCount);
+
+      if (nextViolationCount >= 3) {
+        isStoppingAssessmentRef.current = true;
+        setShowWindowWarning(false);
+        void exitAssessmentFullscreen();
+        submitAssessment("Auto submitted");
         return;
       }
 
@@ -141,14 +202,14 @@ export function SectionRunner({
     }
 
     function handleBeforeUnload(event: BeforeUnloadEvent) {
-      showWarning();
+      showWarning("Tried to leave or reload assessment");
       event.preventDefault();
       event.returnValue = "";
     }
 
     function handleDocumentMouseOut(event: MouseEvent) {
       if (!event.relatedTarget) {
-        showWarning();
+        showWarning("Mouse left the assessment window");
       }
     }
 
@@ -163,45 +224,63 @@ export function SectionRunner({
         return;
       }
 
-      showWarning();
+      showWarning("Browser or operating system shortcut attempted");
       event.preventDefault();
       event.stopPropagation();
     }
 
     function handleVisibilityChange() {
       if (document.visibilityState === "hidden") {
-        showWarning();
+        showWarning("Assessment tab became hidden");
       }
     }
 
+    function handleFullscreenChange() {
+      if (!getAssessmentFullscreenElement()) {
+        showWarning("Exited fullscreen mode");
+      }
+    }
+
+    function handleWindowBlur() {
+      showWarning("Assessment window lost focus");
+    }
+
     window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("blur", showWarning);
+    window.addEventListener("blur", handleWindowBlur);
     document.addEventListener("keydown", handleKeyDown, true);
     document.addEventListener("mouseout", handleDocumentMouseOut);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("blur", showWarning);
+      window.removeEventListener("blur", handleWindowBlur);
       document.removeEventListener("keydown", handleKeyDown, true);
       document.removeEventListener("mouseout", handleDocumentMouseOut);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
     };
-  }, []);
+  }, [section.slug]);
 
   useEffect(() => {
-    const timerStorageKey = `kgm-hiring-assessment-timer-${section.slug}`;
     const storedEndAt = window.sessionStorage.getItem(timerStorageKey);
     const endAt = storedEndAt
       ? Number(storedEndAt)
       : Date.now() + sectionDurationSeconds * 1000;
+    timerEndAtRef.current = endAt;
 
     if (!storedEndAt) {
       window.sessionStorage.setItem(timerStorageKey, String(endAt));
     }
 
     function updateTimer() {
-      const nextTimeLeft = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+      const timerEndAt = timerEndAtRef.current ?? endAt;
+      const nextTimeLeft = Math.max(
+        0,
+        Math.ceil((timerEndAt - Date.now()) / 1000),
+      );
       setTimeLeftSeconds(nextTimeLeft);
     }
 
@@ -209,7 +288,7 @@ export function SectionRunner({
     const intervalId = window.setInterval(updateTimer, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [section.slug, sectionDurationSeconds]);
+  }, [sectionDurationSeconds, timerStorageKey]);
 
   useEffect(() => {
     router.prefetch("/test");
@@ -246,8 +325,10 @@ export function SectionRunner({
     event.preventDefault();
   }
 
-  function stopAssessment() {
+  async function stopAssessment() {
+    isStoppingAssessmentRef.current = true;
     setShowWindowWarning(false);
+    await exitAssessmentFullscreen();
     router.replace("/test");
   }
 
@@ -255,13 +336,25 @@ export function SectionRunner({
     router.replace("/test");
   }
 
-  function continueAssessment() {
-    windowWarningQueuedRef.current = false;
-    setShowWindowWarning(false);
+  function resetSectionTimer() {
+    const nextEndAt = Date.now() + sectionDurationSeconds * 1000;
+
+    timerEndAtRef.current = nextEndAt;
+    window.sessionStorage.setItem(timerStorageKey, String(nextEndAt));
+    setTimeLeftSeconds(sectionDurationSeconds);
   }
 
-  function submitAssessment() {
-    setShowCompletionDialog(true);
+  async function continueAssessment() {
+    const enteredFullscreen = await enterAssessmentFullscreen();
+
+    if (!enteredFullscreen) {
+      windowWarningQueuedRef.current = true;
+      setShowWindowWarning(true);
+      return;
+    }
+
+    windowWarningQueuedRef.current = false;
+    setShowWindowWarning(false);
   }
 
   return (
@@ -290,7 +383,7 @@ export function SectionRunner({
                     variant="outline"
                     className={[
                       "w-fit gap-2 font-mono",
-                      isTimeUp
+                      isTimeUp || isLastMinute
                         ? "border-destructive/30 bg-destructive/10 text-destructive"
                         : "",
                     ].join(" ")}
@@ -310,7 +403,7 @@ export function SectionRunner({
                     <span className="font-medium">Time remaining</span>
                     <span
                       className={
-                        isTimeUp
+                        isTimeUp || isLastMinute
                           ? "font-medium text-destructive"
                           : "text-muted-foreground"
                       }
@@ -472,7 +565,7 @@ export function SectionRunner({
                         </Link>
                       </Button>
                     ) : (
-                      <Button onClick={submitAssessment}>
+                      <Button onClick={() => submitAssessment("Submitted")}>
                         Submit Test
                         <Send className="size-4" />
                       </Button>
@@ -511,10 +604,14 @@ export function SectionRunner({
             <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-destructive text-white">
               <ShieldAlert className="size-5" />
             </div>
-            <DialogTitle>Stay on the assessment screen</DialogTitle>
+            <DialogTitle>Fullscreen required</DialogTitle>
             <DialogDescription>
-              Leaving this window during a live assessment may automatically
-              submit your test. Please continue only if you understand this risk.
+              Violation{" "}
+              <span className="font-mono text-destructive">
+                :{String(lastViolationNumber ?? violationCount).padStart(2, "0")}
+              </span>{" "}
+              recorded. The assessment must stay in fullscreen. On the 3rd
+              violation, the assessment is submitted automatically.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -522,7 +619,7 @@ export function SectionRunner({
               Stop assessment
             </Button>
             <Button onClick={continueAssessment}>
-              I understand, continue test
+              Continue assessment
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -541,6 +638,9 @@ export function SectionRunner({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
+            <Button variant="outline" onClick={resetSectionTimer}>
+              Reset timer
+            </Button>
             <Button onClick={leaveTimedOutSection}>Back to overview</Button>
           </DialogFooter>
         </DialogContent>
@@ -554,10 +654,16 @@ export function SectionRunner({
             </div>
             <DialogTitle>Test submitted</DialogTitle>
             <DialogDescription>
-              Your assessment preview is complete. Saved answers remain on this
-              device until the backend submission endpoint is connected.
+              {submissionStatus === "Auto submitted"
+                ? "The assessment was submitted automatically after 3 fullscreen violations."
+                : "Your assessment preview is complete. Saved answers remain on this device until the backend submission endpoint is connected."}
             </DialogDescription>
           </DialogHeader>
+          {submissionStatus === "Auto submitted" ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+              Assessment terminated after violation :03.
+            </div>
+          ) : null}
           <div className="rounded-md border bg-muted/30 p-4 text-sm">
             <span className="font-medium">{totalAnsweredCount}</span> of{" "}
             <span className="font-medium">{totalQuestionCount}</span> questions
