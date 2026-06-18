@@ -196,7 +196,7 @@ export function TestOverview() {
       </aside>
       </section>
 
-      <Dialog open={showCompletionDialog} onOpenChange={setShowCompletionDialog}>
+      <Dialog open={showCompletionDialog}>
         <DialogContent>
           <DialogHeader>
             <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-emerald-600 text-white">

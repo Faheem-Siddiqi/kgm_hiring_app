@@ -27,6 +27,7 @@ export default async function SectionPage({
 
   return (
     <SectionRunner
+      key={section.slug}
       section={section}
       previousSectionSlug={getPreviousSectionSlug(section.slug)}
       nextSectionSlug={getNextSectionSlug(section.slug)}

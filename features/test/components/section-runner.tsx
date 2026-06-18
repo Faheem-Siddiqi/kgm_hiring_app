@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { flushSync } from "react-dom";
 import {
   useEffect,
   useMemo,
@@ -37,7 +38,10 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import type { AssessmentSection } from "@/features/test/assessment-data";
+import {
+  assessmentSections,
+  type AssessmentSection,
+} from "@/features/test/assessment-data";
 import {
   getAnsweredCount,
   getTotalQuestionCount,
@@ -101,6 +105,13 @@ export function SectionRunner({
     () => section.questions.map((question) => question.id),
     [section.questions],
   );
+  const allQuestionIds = useMemo(
+    () =>
+      assessmentSections.flatMap((assessmentSection) =>
+        assessmentSection.questions.map((question) => question.id),
+      ),
+    [],
+  );
   const answeredCount = getAnsweredCount(answers, questionIds);
   const sectionProgress = Math.round(
     (answeredCount / section.questions.length) * 100,
@@ -115,7 +126,7 @@ export function SectionRunner({
     ? Math.round((timeLeftSeconds / sectionDurationSeconds) * 100)
     : 0;
   const totalQuestionCount = getTotalQuestionCount();
-  const totalAnsweredCount = getAnsweredCount(answers, Object.keys(answers));
+  const totalAnsweredCount = getAnsweredCount(answers, allQuestionIds);
 
   useEffect(() => {
     function showWarning() {
@@ -124,12 +135,37 @@ export function SectionRunner({
       }
 
       windowWarningQueuedRef.current = true;
-      setShowWindowWarning(true);
+      flushSync(() => {
+        setShowWindowWarning(true);
+      });
     }
 
     function handleBeforeUnload(event: BeforeUnloadEvent) {
+      showWarning();
       event.preventDefault();
       event.returnValue = "";
+    }
+
+    function handleDocumentMouseOut(event: MouseEvent) {
+      if (!event.relatedTarget) {
+        showWarning();
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      const isBrowserOrWindowShortcut =
+        event.altKey ||
+        event.metaKey ||
+        (event.ctrlKey &&
+          ["l", "n", "r", "t", "w", "tab"].includes(event.key.toLowerCase()));
+
+      if (!isBrowserOrWindowShortcut) {
+        return;
+      }
+
+      showWarning();
+      event.preventDefault();
+      event.stopPropagation();
     }
 
     function handleVisibilityChange() {
@@ -140,11 +176,15 @@ export function SectionRunner({
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     window.addEventListener("blur", showWarning);
+    document.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("mouseout", handleDocumentMouseOut);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       window.removeEventListener("blur", showWarning);
+      document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("mouseout", handleDocumentMouseOut);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
@@ -170,11 +210,6 @@ export function SectionRunner({
 
     return () => window.clearInterval(intervalId);
   }, [section.slug, sectionDurationSeconds]);
-
-  useEffect(() => {
-    setCurrentIndex(0);
-    setIsChangingSection(false);
-  }, [section.slug]);
 
   useEffect(() => {
     router.prefetch("/test");
@@ -511,7 +546,7 @@ export function SectionRunner({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showCompletionDialog} onOpenChange={setShowCompletionDialog}>
+      <Dialog open={showCompletionDialog}>
         <DialogContent>
           <DialogHeader>
             <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-emerald-600 text-white">
