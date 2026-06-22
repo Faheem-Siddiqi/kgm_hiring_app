@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useState } from "react";
-import { ArrowLeft, BriefcaseBusiness, LockKeyhole } from "lucide-react";
+import { BriefcaseBusiness, LockKeyhole } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -15,15 +15,11 @@ export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: bo
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [formError, setFormError] = useState(
-    sessionExpired ? "Your session expired. Please sign in again." : "",
-  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
-    setFormError("");
 
     const response = await fetch("/api/admin/session", {
       method: "POST",
@@ -34,7 +30,6 @@ export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: bo
     if (!response.ok) {
       const result = (await response.json()) as { message?: string };
       const message = result.message ?? "Sign-in failed.";
-      setFormError(message);
       toast.error(message);
       setIsSubmitting(false);
       return;
@@ -48,7 +43,7 @@ export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: bo
   return (
     <>
       <SessionExpiryDialog open={sessionExpired} />
-      <Card className="w-full max-w-md shadow-lg">
+      <Card className="w-full max-w-md shadow-xs">
         <CardHeader className="space-y-4">
           <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <BriefcaseBusiness className="size-5" />
@@ -70,34 +65,35 @@ export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: bo
               <Label htmlFor="admin-password">Password</Label>
               <Input className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs" id="admin-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
             </div>
-            {formError ? (
+            {/* {formError ? (
               <p className="text-sm text-destructive">
                 {formError}
               </p>
-            ) : null}
+            ) : null} */}
             <Button className="w-full" disabled={isSubmitting} type="submit">
               <LockKeyhole className="size-4" />
-              {isSubmitting ? "Signing in..." : "Sign In"}
+              {isSubmitting ? "Signing In..." : "Sign In"}
             </Button>
-          <Button asChild className="w-full" variant="link">
-            <Link
-              href={`/admin/request-reset-link${
-                  email.trim()
-                    ? `?email=${encodeURIComponent(email.trim())}`
-                    : ""
-                }`}
-              >
-              Forgot password?
-            </Link>
-          </Button>
-          <Button asChild className="w-full" variant="ghost">
-            <Link href="/admin/request-access-invitation">
-              Request admin access
-            </Link>
-          </Button>
-          <Button asChild className="w-full" variant="ghost">
-            <Link href="/"><ArrowLeft className="size-4" />Candidate portal</Link>
-          </Button>
+       
+          
+
+          <Button
+  asChild
+  className="h-auto w-full p-0 no-underline hover:no-underline"
+  variant="link"
+>
+  <Link
+    href={`/admin/request-reset-link${
+      email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ""
+    }`}
+    className="flex w-full justify-center no-underline hover:no-underline"
+  >
+    <span className="relative block w-fit after:absolute after:left-0 after:bottom-0 after:block after:h-[1px] after:w-full after:origin-center after:scale-x-0 after:bg-current after:transition after:duration-300 after:content-[''] hover:after:scale-x-100">
+      Forgot password?
+    </span>
+  </Link>
+</Button>
+      
           </form>
         </CardContent>
       </Card>

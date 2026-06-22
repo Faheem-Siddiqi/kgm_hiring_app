@@ -1,9 +1,9 @@
 "use client";
-
-import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, Clock3, Mail } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -21,7 +21,6 @@ export function RequestResetLinkForm({
   initialEmail?: string;
 }) {
   const [email, setEmail] = useState(initialEmail);
-  const [message, setMessage] = useState("");
   const [isReady, setIsReady] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -51,7 +50,6 @@ export function RequestResetLinkForm({
     }
 
     setIsSubmitting(true);
-    setMessage("");
 
     const response = await fetch("/api/admin/request-reset-link", {
       method: "POST",
@@ -68,8 +66,7 @@ export function RequestResetLinkForm({
 
     const nextMessage =
       result.message ??
-      "If this active admin email exists, a password reset link has been sent.";
-    setMessage(nextMessage);
+      "If admin email exists, a password reset link has been sent.";
     setCooldown(60);
     toast.success(nextMessage);
     setIsSubmitting(false);
@@ -80,8 +77,8 @@ export function RequestResetLinkForm({
       <CardHeader className="space-y-3">
         <CardTitle className="text-2xl">Request reset link</CardTitle>
         <CardDescription>
-          Enter the admin email registered in KGM Hiring. Reset links are sent
-          only for active admin accounts that already have a password.
+         Please enter the registered email. Reset links are sent
+          only for active admins.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -108,9 +105,9 @@ export function RequestResetLinkForm({
               </div>
             </div>
           )}
-          {message ? (
+          {/* {message ? (
             <p className="text-sm text-muted-foreground">{message}</p>
-          ) : null}
+          ) : null} */}
           <Button
             className="w-full"
             disabled={isSubmitting || !isReady || cooldown > 0}

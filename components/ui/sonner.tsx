@@ -10,7 +10,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-const Toaster = ({ position = "top-center", ...props }: ToasterProps) => {
+const Toaster = ({ position = "bottom-right", ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme();
 
   return (
@@ -28,7 +28,7 @@ const Toaster = ({ position = "top-center", ...props }: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast:
-            "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",
+            "group toast group-[.toaster]:rounded-xl group-[.toaster]:border group-[.toaster]:bg-background/95 group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-2xl group-[.toaster]:backdrop-blur",
           description: "group-[.toast]:text-muted-foreground",
           actionButton:
             "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",

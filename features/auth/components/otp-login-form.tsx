@@ -77,6 +77,17 @@ export function OtpLoginForm() {
             {isSubmitting ? "Opening assessment..." : "Continue to assessment"}
           </Button>
           <div className="border-t pt-4 text-center">
+            <p className="mb-2 text-xs text-muted-foreground">
+              Applying for a role?
+            </p>
+            <Button asChild className="w-full" variant="secondary">
+              <Link href="/jobs">
+                <BriefcaseBusiness className="size-4" />
+                Browse open jobs
+              </Link>
+            </Button>
+          </div>
+          <div className="border-t pt-4 text-center">
             <p className="mb-2 text-xs text-muted-foreground">KGM hiring team member?</p>
             <Button asChild className="w-full" variant="outline">
               <Link href="/admin/login">
