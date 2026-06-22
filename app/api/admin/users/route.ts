@@ -6,7 +6,7 @@ import {
   canModerateAdminUsers,
   canViewTemporaryPasswords,
   clearTemporaryPasswordBackup,
-  createPasswordReset,
+  createAdminInvitationToken,
   createSubAdminUser,
   deleteAdminUser,
   listAdminUsers,
@@ -18,7 +18,7 @@ import {
   ADMIN_SESSION_COOKIE,
   getAdminSessionToken,
 } from "@/lib/admin-session";
-import { sendAdminInviteEmail } from "@/lib/admin-mailer";
+import { sendAdminInviteEmail } from "@/lib/mail/admin-mailer";
 import {
   getDevErrorDiagnostic,
   logServerError,
@@ -133,13 +133,13 @@ export const POST = withErrorHandler(async (request: Request) => {
     };
 
     try {
-      const reset = await createPasswordReset(user.email);
+      const reset = await createAdminInvitationToken(user.email);
 
       if (!reset) {
         throw new Error("Setup link could not be prepared.");
       }
 
-      const setupUrl = `${getBaseUrl()}/admin/reset-password?token=${encodeURIComponent(reset.token)}`;
+      const setupUrl = `${getBaseUrl()}/admin/setup-password?token=${encodeURIComponent(reset.token)}`;
       mail = await sendAdminInviteEmail({ user, setupUrl });
     } catch (error) {
       const report = logServerError(error, {

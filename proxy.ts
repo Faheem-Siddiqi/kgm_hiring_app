@@ -8,8 +8,10 @@ import {
 export function proxy(request: NextRequest) {
   const publicAdminPaths = [
     "/admin/login",
-    "/admin/forgot-password",
+    "/admin/request-reset-link",
+    "/admin/request-access-invitation",
     "/admin/reset-password",
+    "/admin/setup-password",
   ];
   const isPublicAdminPage = publicAdminPaths.includes(request.nextUrl.pathname);
   const isAuthenticated =

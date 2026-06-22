@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SessionExpiryDialog } from "@/features/auth/components/session-expiry-dialog";
 
 export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: boolean }) {
   const router = useRouter();
@@ -45,53 +46,61 @@ export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: bo
   }
 
   return (
-    <Card className="w-full max-w-md shadow-lg">
-      <CardHeader className="space-y-4">
-        <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <BriefcaseBusiness className="size-5" />
-        </div>
-        <div>
-          <CardTitle className="text-2xl">Hiring Workspace</CardTitle>
-          <CardDescription className="mt-2">
-            Sign in to create assessments, invite candidates, and review results.
-          </CardDescription>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          <div className="space-y-2">
-            <Label htmlFor="admin-email">Work email</Label>
-            <Input className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs" id="admin-email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
+    <>
+      <SessionExpiryDialog open={sessionExpired} />
+      <Card className="w-full max-w-md shadow-lg">
+        <CardHeader className="space-y-4">
+          <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <BriefcaseBusiness className="size-5" />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="admin-password">Password</Label>
-            <Input className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs" id="admin-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+          <div>
+            <CardTitle className="text-2xl">Hiring Workspace</CardTitle>
+            <CardDescription className="mt-2">
+              Sign in to create assessments, invite candidates, and review results.
+            </CardDescription>
           </div>
-          {formError ? (
-            <p className="text-sm text-destructive">
-              {formError}
-            </p>
-          ) : null}
-          <Button className="w-full" disabled={isSubmitting} type="submit">
-            <LockKeyhole className="size-4" />
-            {isSubmitting ? "Signing in..." : "Sign In"}
-          </Button>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-5" onSubmit={handleSubmit}>
+            <div className="space-y-2">
+              <Label htmlFor="admin-email">Work email</Label>
+              <Input className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs" id="admin-email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="admin-password">Password</Label>
+              <Input className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs" id="admin-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+            </div>
+            {formError ? (
+              <p className="text-sm text-destructive">
+                {formError}
+              </p>
+            ) : null}
+            <Button className="w-full" disabled={isSubmitting} type="submit">
+              <LockKeyhole className="size-4" />
+              {isSubmitting ? "Signing in..." : "Sign In"}
+            </Button>
           <Button asChild className="w-full" variant="link">
             <Link
-              href={`/admin/forgot-password${
-                email.trim()
-                  ? `?email=${encodeURIComponent(email.trim())}`
-                  : ""
-              }`}
-            >
+              href={`/admin/request-reset-link${
+                  email.trim()
+                    ? `?email=${encodeURIComponent(email.trim())}`
+                    : ""
+                }`}
+              >
               Forgot password?
+            </Link>
+          </Button>
+          <Button asChild className="w-full" variant="ghost">
+            <Link href="/admin/request-access-invitation">
+              Request admin access
             </Link>
           </Button>
           <Button asChild className="w-full" variant="ghost">
             <Link href="/"><ArrowLeft className="size-4" />Candidate portal</Link>
           </Button>
-        </form>
-      </CardContent>
-    </Card>
+          </form>
+        </CardContent>
+      </Card>
+    </>
   );
 }

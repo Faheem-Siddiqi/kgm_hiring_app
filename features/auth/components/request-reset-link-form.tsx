@@ -15,7 +15,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function ForgotPasswordForm({ initialEmail = "" }: { initialEmail?: string }) {
+export function RequestResetLinkForm({
+  initialEmail = "",
+}: {
+  initialEmail?: string;
+}) {
   const [email, setEmail] = useState(initialEmail);
   const [message, setMessage] = useState("");
   const [isReady, setIsReady] = useState(false);
@@ -49,7 +53,7 @@ export function ForgotPasswordForm({ initialEmail = "" }: { initialEmail?: strin
     setIsSubmitting(true);
     setMessage("");
 
-    const response = await fetch("/api/admin/forgot-password", {
+    const response = await fetch("/api/admin/request-reset-link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -63,7 +67,8 @@ export function ForgotPasswordForm({ initialEmail = "" }: { initialEmail?: strin
     }
 
     const nextMessage =
-      result.message ?? "If this email exists, a reset link has been sent.";
+      result.message ??
+      "If this active admin email exists, a password reset link has been sent.";
     setMessage(nextMessage);
     setCooldown(60);
     toast.success(nextMessage);
@@ -73,9 +78,10 @@ export function ForgotPasswordForm({ initialEmail = "" }: { initialEmail?: strin
   return (
     <Card className="w-full max-w-md shadow-lg">
       <CardHeader className="space-y-3">
-        <CardTitle className="text-2xl">Forgot password</CardTitle>
+        <CardTitle className="text-2xl">Request reset link</CardTitle>
         <CardDescription>
-          Enter your admin email and we will send a reset link if the account exists.
+          Enter the admin email registered in KGM Hiring. Reset links are sent
+          only for active admin accounts that already have a password.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -89,10 +95,10 @@ export function ForgotPasswordForm({ initialEmail = "" }: { initialEmail?: strin
           ) : (
             <div className="space-y-3">
               <div className="space-y-2">
-                <Label htmlFor="forgot-email">Confirm admin email</Label>
+                <Label htmlFor="reset-email">Registered admin email</Label>
                 <Input
                   className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
-                  id="forgot-email"
+                  id="reset-email"
                   type="email"
                   autoComplete="username"
                   value={email}
@@ -103,9 +109,7 @@ export function ForgotPasswordForm({ initialEmail = "" }: { initialEmail?: strin
             </div>
           )}
           {message ? (
-            <p className="text-sm text-muted-foreground">
-              {message}
-            </p>
+            <p className="text-sm text-muted-foreground">{message}</p>
           ) : null}
           <Button
             className="w-full"
@@ -120,7 +124,7 @@ export function ForgotPasswordForm({ initialEmail = "" }: { initialEmail?: strin
             ) : (
               <>
                 <Mail className="size-4" />
-                {isSubmitting ? "Sending..." : "Send reset link"}
+                {isSubmitting ? "Sending..." : "Request reset link"}
               </>
             )}
           </Button>

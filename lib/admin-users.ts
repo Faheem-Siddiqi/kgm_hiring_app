@@ -1,5 +1,4 @@
-import "server-only";
-
+import { ObjectId, type Collection, type Db, type WithId } from "mongodb";
 import {
   createHash,
   randomBytes,
@@ -7,13 +6,14 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { promisify } from "node:util";
-import { ObjectId, type Collection, type Db, type WithId } from "mongodb";
+import "server-only";
+
 import { getDatabase } from "@/db";
+import { ADMIN_INVITATION_DURATION_MS } from "@/lib/admin-constants";
 
 const scrypt = promisify(scryptCallback);
 const SESSION_DURATION_MS = 30 * 60 * 1000;
 const RESET_TOKEN_DURATION_MS = 20 * 60 * 1000;
-const ADMIN_INVITATION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ADMIN_PASSWORD = "1234";
 
 export type AdminUserRole = "main-admin" | "sub-admin";
@@ -35,6 +35,7 @@ export type AdminUserDocument = {
   lastLoginAt?: Date;
   resetTokenHash?: string;
   resetTokenExpiresAt?: Date;
+  resetTokenPurpose?: "admin-invitation" | "password-reset";
 };
 
 export type PublicAdminUser = {
@@ -55,6 +56,14 @@ export type PublicAdminUser = {
 export type AdminSession = {
   user: PublicAdminUser;
   expiresAt: string;
+};
+
+export type PasswordTokenStatus = {
+  valid: boolean;
+  purpose: "admin-invitation" | "password-reset" | null;
+  message?: string;
+  email?: string;
+  expiresAt?: string;
 };
 
 type AdminSessionDocument = {
@@ -314,9 +323,29 @@ async function ensureAdminSeeds() {
   return seedsReady;
 }
 
+async function clearExpiredPasswordResetTokens(
+  users: Collection<AdminUserDocument>,
+) {
+  await users.updateMany(
+    {
+      resetTokenPurpose: "password-reset",
+      resetTokenExpiresAt: { $lte: new Date() },
+    },
+    {
+      $unset: {
+        resetTokenHash: "",
+        resetTokenExpiresAt: "",
+        resetTokenPurpose: "",
+      },
+      $set: { updatedAt: new Date() },
+    },
+  );
+}
+
 export async function listAdminUsers() {
   await ensureAdminSeeds();
   const { users } = await getAdminCollections();
+  await clearExpiredPasswordResetTokens(users);
   const adminUsers = await users
     .find(
       {},
@@ -340,6 +369,88 @@ export async function listAdminUsers() {
     .toArray();
 
   return adminUsers.map(toPublicAdminUser);
+}
+
+export async function listAdminInvitationManagers() {
+  await ensureAdminSeeds();
+  const { users } = await getAdminCollections();
+  const adminUsers = await users
+    .find(
+      {
+        role: "main-admin",
+        isAdmin: true,
+        paused: { $ne: true },
+      },
+      {
+        projection: {
+          name: 1,
+          designation: 1,
+          email: 1,
+          role: 1,
+          isAdmin: 1,
+          canManageAdmins: 1,
+          paused: 1,
+          mustChangePassword: 1,
+          createdAt: 1,
+        },
+      },
+    )
+    .toArray();
+
+  return adminUsers.map(toPublicAdminUser).filter(canManageAdminUsers);
+}
+
+export async function findAdminInvitationManagerByEmail(email: string) {
+  await ensureAdminSeeds();
+  const { users } = await getAdminCollections();
+  const user = await users.findOne({
+    email: normalizeEmail(email),
+    role: "main-admin",
+    isAdmin: true,
+    paused: { $ne: true },
+  });
+
+  if (!user) {
+    return null;
+  }
+
+  const publicUser = toPublicAdminUser(user);
+
+  return canManageAdminUsers(publicUser) ? publicUser : null;
+}
+
+export async function getAdminAccessRequestState(email: string) {
+  await ensureAdminSeeds();
+  const { users } = await getAdminCollections();
+  const user = await users.findOne({ email: normalizeEmail(email) });
+
+  if (!user) {
+    return {
+      status: "not-found",
+      user: null,
+    } as const;
+  }
+
+  if (user.paused) {
+    return {
+      status: "paused",
+      user: toPublicAdminUser(user),
+    } as const;
+  }
+
+  if (user.mustChangePassword) {
+    return {
+      status: isExpired(user.invitationExpiresAt)
+        ? "expired-pending"
+        : "pending",
+      user: toPublicAdminUser(user),
+    } as const;
+  }
+
+  return {
+    status: "active",
+    user: toPublicAdminUser(user),
+  } as const;
 }
 
 export async function createSubAdminUser(input: {
@@ -431,6 +542,7 @@ export async function clearTemporaryPasswordBackup(userId: string) {
 export async function findAdminUserByCredentials(email: string, password: string) {
   await ensureAdminSeeds();
   const { users } = await getAdminCollections();
+  await clearExpiredPasswordResetTokens(users);
   const user = await users.findOne({ email: normalizeEmail(email) });
 
   if (
@@ -562,17 +674,46 @@ export async function deleteAdminSessionToken(token?: string | null) {
   await sessions.deleteOne({ tokenHash: hashToken(token) });
 }
 
-export async function createPasswordReset(email: string) {
+async function createPasswordToken(
+  email: string,
+  purpose: "admin-invitation" | "password-reset",
+) {
   await ensureAdminSeeds();
   const { users } = await getAdminCollections();
+  await clearExpiredPasswordResetTokens(users);
   const user = await users.findOne({ email: normalizeEmail(email) });
 
   if (!user) {
     return null;
   }
 
+  if (purpose === "password-reset" && (user.mustChangePassword || user.paused)) {
+    return null;
+  }
+
+  if (purpose === "admin-invitation") {
+    if (user.role !== "sub-admin") {
+      throw new AdminUserError("Invitation links are only available for sub-admin accounts.", 400);
+    }
+
+    if (!user.mustChangePassword) {
+      throw new AdminUserError("This admin has already set a password.", 409);
+    }
+
+    if (isExpired(user.invitationExpiresAt)) {
+      await users.deleteOne({ _id: user._id });
+      throw new AdminUserError(
+        "This invitation expired. Add the admin again to send a fresh setup link.",
+        410,
+      );
+    }
+  }
+
   const token = generateToken();
-  const expiresAt = new Date(Date.now() + RESET_TOKEN_DURATION_MS);
+  const duration = purpose === "admin-invitation"
+    ? ADMIN_INVITATION_DURATION_MS
+    : RESET_TOKEN_DURATION_MS;
+  const expiresAt = new Date(Date.now() + duration);
 
   await users.updateOne(
     { _id: user._id },
@@ -580,6 +721,7 @@ export async function createPasswordReset(email: string) {
       $set: {
         resetTokenHash: hashToken(token),
         resetTokenExpiresAt: expiresAt,
+        resetTokenPurpose: purpose,
         updatedAt: new Date(),
       },
     },
@@ -588,7 +730,148 @@ export async function createPasswordReset(email: string) {
   return { user: toPublicAdminUser(user), token, expiresAt };
 }
 
-export async function resetPasswordWithToken(token: string, password: string) {
+export function createAdminInvitationToken(email: string) {
+  return createPasswordToken(email, "admin-invitation");
+}
+
+export function createPasswordReset(email: string) {
+  return createPasswordToken(email, "password-reset");
+}
+
+function getPasswordTokenPurpose(user: AdminUserDocument) {
+  if (
+    user.resetTokenPurpose === "admin-invitation" ||
+    (user.role === "sub-admin" &&
+      user.mustChangePassword &&
+      Boolean(user.invitationExpiresAt))
+  ) {
+    return "admin-invitation" as const;
+  }
+
+  return "password-reset" as const;
+}
+
+async function getPasswordTokenStatus(
+  token: string,
+  expectedPurpose?: "admin-invitation" | "password-reset",
+): Promise<PasswordTokenStatus> {
+  if (!token) {
+    return {
+      valid: false,
+      purpose: null,
+      message:
+        expectedPurpose === "password-reset"
+          ? "Password reset link is missing. Request a new reset link."
+          : "Admin setup link is missing. Ask an administrator for a new invitation.",
+    };
+  }
+
+  const { users } = await getAdminCollections();
+  const user = await users.findOne({ resetTokenHash: hashToken(token) });
+
+  if (!user) {
+    return {
+      valid: false,
+      purpose: null,
+      message: "This link is invalid, expired, or has already been used.",
+    };
+  }
+
+  const purpose = getPasswordTokenPurpose(user);
+
+  if (expectedPurpose && purpose !== expectedPurpose) {
+    return {
+      valid: false,
+      purpose,
+      message:
+        expectedPurpose === "admin-invitation"
+          ? "This is not an admin setup link. Ask an administrator for a new invitation."
+          : "This is not a password reset link. Use the first-time setup page from your invitation email.",
+    };
+  }
+
+  if (purpose === "admin-invitation" && isExpired(user.invitationExpiresAt)) {
+    await users.deleteOne({ _id: user._id });
+    return {
+      valid: false,
+      purpose,
+      message:
+        "This setup link expired and the pending admin account was removed. Ask an administrator to add the account again.",
+    };
+  }
+
+  if (isExpired(user.resetTokenExpiresAt)) {
+    if (purpose === "admin-invitation") {
+      await users.deleteOne({ _id: user._id });
+      return {
+        valid: false,
+        purpose,
+        message:
+          "This setup link expired and the pending admin account was removed. Ask an administrator to add the account again.",
+      };
+    }
+
+    await users.updateOne(
+      { _id: user._id },
+      {
+        $unset: {
+          resetTokenHash: "",
+          resetTokenExpiresAt: "",
+          resetTokenPurpose: "",
+        },
+        $set: { updatedAt: new Date() },
+      },
+    );
+
+    return {
+      valid: false,
+      purpose,
+      message: "This link has expired. Request a new one to continue.",
+    };
+  }
+
+  if (purpose === "admin-invitation" && !user.mustChangePassword) {
+    await users.updateOne(
+      { _id: user._id },
+      {
+        $unset: {
+          resetTokenHash: "",
+          resetTokenExpiresAt: "",
+          resetTokenPurpose: "",
+        },
+        $set: { updatedAt: new Date() },
+      },
+    );
+
+    return {
+      valid: false,
+      purpose,
+      message:
+        "This setup link has already been used. Sign in with your existing password.",
+    };
+  }
+
+  return {
+    valid: true,
+    purpose,
+    email: user.email,
+    expiresAt: user.resetTokenExpiresAt?.toISOString(),
+  };
+}
+
+export function getAdminInvitationTokenStatus(token: string) {
+  return getPasswordTokenStatus(token, "admin-invitation");
+}
+
+export function getPasswordResetTokenStatus(token: string) {
+  return getPasswordTokenStatus(token, "password-reset");
+}
+
+async function updatePasswordWithToken(
+  token: string,
+  password: string,
+  expectedPurpose: "admin-invitation" | "password-reset",
+) {
   if (password.length < 8) {
     throw new AdminUserError("Password must be at least 8 characters.", 400);
   }
@@ -596,7 +879,76 @@ export async function resetPasswordWithToken(token: string, password: string) {
   const { users } = await getAdminCollections();
   const user = await users.findOne({ resetTokenHash: hashToken(token) });
 
-  if (!user || isExpired(user.resetTokenExpiresAt)) {
+  if (!user) {
+    throw new AdminUserError("This reset link is invalid or expired.", 400);
+  }
+
+  const purpose = getPasswordTokenPurpose(user);
+
+  if (purpose !== expectedPurpose) {
+    throw new AdminUserError(
+      expectedPurpose === "admin-invitation"
+        ? "This is not an admin setup link. Ask an administrator for a new invitation."
+        : "This is not a password reset link. Use the first-time setup page from your invitation email.",
+      400,
+    );
+  }
+
+  if (purpose === "admin-invitation" && !user.mustChangePassword) {
+    await users.updateOne(
+      { _id: user._id },
+      {
+        $unset: {
+          resetTokenHash: "",
+          resetTokenExpiresAt: "",
+          resetTokenPurpose: "",
+        },
+        $set: { updatedAt: new Date() },
+      },
+    );
+    throw new AdminUserError(
+      "This setup link has already been used. Sign in with your existing password.",
+      409,
+    );
+  }
+
+  if (purpose === "admin-invitation" && isExpired(user.invitationExpiresAt)) {
+    await users.deleteOne({ _id: user._id });
+    throw new AdminUserError(
+      "This setup link expired and the pending admin account was removed. Ask an administrator to add the account again.",
+      410,
+    );
+  }
+
+  if (isExpired(user.resetTokenExpiresAt)) {
+    const isPendingSubAdmin =
+      user.role === "sub-admin" &&
+      user.mustChangePassword;
+    const isExpiredInvitationToken =
+      isPendingSubAdmin &&
+      (user.resetTokenPurpose === "admin-invitation" ||
+        (!user.resetTokenPurpose && isExpired(user.invitationExpiresAt)));
+
+    if (isExpiredInvitationToken) {
+      await users.deleteOne({ _id: user._id });
+      throw new AdminUserError(
+        "This setup link expired and the pending admin account was removed. Ask an administrator to add the account again.",
+        400,
+      );
+    } else {
+      await users.updateOne(
+        { _id: user._id },
+        {
+          $unset: {
+            resetTokenHash: "",
+            resetTokenExpiresAt: "",
+            resetTokenPurpose: "",
+          },
+          $set: { updatedAt: new Date() },
+        },
+      );
+    }
+
     throw new AdminUserError("This reset link is invalid or expired.", 400);
   }
 
@@ -613,9 +965,18 @@ export async function resetPasswordWithToken(token: string, password: string) {
         invitationExpiresAt: "",
         resetTokenHash: "",
         resetTokenExpiresAt: "",
+        resetTokenPurpose: "",
       },
     },
   );
+}
+
+export function setAdminPasswordWithInvitation(token: string, password: string) {
+  return updatePasswordWithToken(token, password, "admin-invitation");
+}
+
+export function resetPasswordWithToken(token: string, password: string) {
+  return updatePasswordWithToken(token, password, "password-reset");
 }
 
 export async function removeAllSubAdminsForCleanStart() {

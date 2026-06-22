@@ -1,9 +1,9 @@
 "use client";
-import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, CheckCircle2, LockKeyhole } from "lucide-react";
-import Link from "next/link";
-import { toast } from "sonner";
 
+import Link from "next/link";
+import { FormEvent, useEffect, useState } from "react";
+import { ArrowLeft, CheckCircle2, KeyRound } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ADMIN_INVITATION_EXPIRY_DAYS } from "@/lib/admin-constants";
 
 type TokenStatus = {
   valid: boolean;
@@ -23,7 +24,7 @@ type TokenStatus = {
   expiresAt?: string;
 };
 
-export function ResetPasswordForm({ token }: { token: string }) {
+export function SetupPasswordForm({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [formError, setFormError] = useState("");
@@ -31,6 +32,12 @@ export function ResetPasswordForm({ token }: { token: string }) {
   const [isComplete, setIsComplete] = useState(false);
   const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
   const [isCheckingToken, setIsCheckingToken] = useState(Boolean(token));
+  const expiresAtLabel = tokenStatus?.expiresAt
+    ? new Intl.DateTimeFormat("en", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(tokenStatus.expiresAt))
+    : "";
 
   useEffect(() => {
     let isMounted = true;
@@ -41,7 +48,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
           valid: false,
           purpose: null,
           message:
-            "Password setup link is missing. Ask an administrator for a new link.",
+            "Admin setup link is missing. Ask an administrator for a new invitation.",
         });
         setIsCheckingToken(false);
         return;
@@ -51,7 +58,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
 
       try {
         const response = await fetch(
-          `/api/admin/reset-password?token=${encodeURIComponent(token)}`,
+          `/api/admin/setup-password?token=${encodeURIComponent(token)}`,
           { cache: "no-store" },
         );
         const result = (await response.json()) as TokenStatus;
@@ -60,15 +67,15 @@ export function ResetPasswordForm({ token }: { token: string }) {
 
         setTokenStatus(result);
         if (!response.ok) {
-          setFormError(result.message ?? "This link is not available.");
+          setFormError(result.message ?? "This setup link is not available.");
         }
       } catch (error) {
         if (!isMounted) return;
-        console.error("Could not verify password setup link", error);
+        console.error("Could not verify admin setup link", error);
         setTokenStatus({
           valid: false,
           purpose: null,
-          message: "Could not verify this link. Please request a new one.",
+          message: "Could not verify this setup link. Ask an administrator for a new invitation.",
         });
       } finally {
         if (isMounted) {
@@ -90,14 +97,14 @@ export function ResetPasswordForm({ token }: { token: string }) {
     setFormError("");
 
     if (!tokenStatus?.valid) {
-      const message = tokenStatus?.message ?? "This link is not available.";
+      const message = tokenStatus?.message ?? "This setup link is not available.";
       setFormError(message);
       toast.error(message);
       setIsSubmitting(false);
       return;
     }
 
-    const response = await fetch("/api/admin/reset-password", {
+    const response = await fetch("/api/admin/setup-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, password, confirmPassword }),
@@ -105,9 +112,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
     const result = (await response.json()) as { message?: string };
 
     if (!response.ok) {
-      const message =
-        result.message ??
-        "Could not reset password.";
+      const message = result.message ?? "Could not set your first-time password.";
       setFormError(message);
       toast.error(message);
       setIsSubmitting(false);
@@ -115,7 +120,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
     }
 
     setIsComplete(true);
-    toast.success("Password updated. Please sign in again.");
+    toast.success("Password set. Please sign in to your admin workspace.");
     setIsSubmitting(false);
   }
 
@@ -123,12 +128,12 @@ export function ResetPasswordForm({ token }: { token: string }) {
     <Card className="w-full max-w-md shadow-lg">
       <CardHeader className="space-y-3">
         <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <LockKeyhole className="size-5" />
+          <KeyRound className="size-5" />
         </div>
-        <CardTitle className="text-2xl">Reset password</CardTitle>
+        <CardTitle className="text-2xl">Set your admin password</CardTitle>
         <CardDescription>
-          Set a new password for an existing admin account. Reset links expire
-          after 20 minutes.
+          Create your private password to activate KGM Hiring admin access. This
+          first-time setup link expires in {ADMIN_INVITATION_EXPIRY_DAYS} days.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -140,19 +145,22 @@ export function ResetPasswordForm({ token }: { token: string }) {
         ) : !tokenStatus?.valid ? (
           <div className="space-y-4">
             <p className="text-sm text-destructive">
-              {tokenStatus?.message ?? "This link is not available."}
+              {tokenStatus?.message ?? "This setup link is not available."}
             </p>
             <Button asChild className="w-full">
-              <Link href="/admin/request-reset-link">Request reset link</Link>
+              <Link href="/admin/request-access-invitation">
+                Request a fresh invitation
+              </Link>
+            </Button>
+            <Button asChild className="w-full">
+              <Link href="/admin/login">Back to login</Link>
             </Button>
           </div>
         ) : isComplete ? (
           <div className="space-y-4">
             <p className="flex items-start gap-2 text-sm text-muted-foreground">
               <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-              <span>
-                Your password has been updated.
-              </span>
+              <span>Your admin password is ready. Sign in to continue.</span>
             </p>
             <Button asChild className="w-full">
               <Link href="/admin/login">Sign in</Link>
@@ -160,11 +168,17 @@ export function ResetPasswordForm({ token }: { token: string }) {
           </div>
         ) : (
           <form className="space-y-5" onSubmit={handleSubmit}>
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+              First-time setup link expires{" "}
+              {expiresAtLabel
+                ? `on ${expiresAtLabel}`
+                : `in ${ADMIN_INVITATION_EXPIRY_DAYS} days`}.
+            </div>
             <div className="space-y-2">
-              <Label htmlFor="new-password">New password</Label>
+              <Label htmlFor="setup-password">New password</Label>
               <Input
                 className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
-                id="new-password"
+                id="setup-password"
                 type="password"
                 autoComplete="new-password"
                 value={password}
@@ -174,10 +188,10 @@ export function ResetPasswordForm({ token }: { token: string }) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirm-password">Confirm password</Label>
+              <Label htmlFor="setup-confirm-password">Confirm password</Label>
               <Input
                 className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
-                id="confirm-password"
+                id="setup-confirm-password"
                 type="password"
                 autoComplete="new-password"
                 value={confirmPassword}
@@ -190,10 +204,8 @@ export function ResetPasswordForm({ token }: { token: string }) {
               <p className="text-sm text-destructive">{formError}</p>
             ) : null}
             <Button className="w-full" disabled={isSubmitting} type="submit">
-              <LockKeyhole className="size-4" />
-              {isSubmitting
-                ? "Updating..."
-                : "Update password"}
+              <KeyRound className="size-4" />
+              {isSubmitting ? "Setting password..." : "Set password"}
             </Button>
             <Button asChild className="w-full" variant="ghost">
               <Link href="/admin/login">

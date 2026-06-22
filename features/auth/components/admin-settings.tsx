@@ -34,6 +34,8 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SessionExpiryDialog } from "@/features/auth/components/session-expiry-dialog";
+import { ADMIN_INVITATION_EXPIRY_DAYS } from "@/lib/admin-constants";
 import { cn } from "@/lib/utils";
 
 
@@ -120,6 +122,14 @@ function getStatusLabel(user: AdminUser) {
   return user.mustChangePassword ? "Setup pending" : "Active";
 }
 
+function getInvitationExpiryLabel(user: AdminUser) {
+  if (!user.mustChangePassword || !user.invitationExpiresAt) {
+    return "";
+  }
+
+  return `First-time setup expires ${formatDate(user.invitationExpiresAt)}`;
+}
+
 function getRoleLabel(user: AdminUser) {
   if (user.role === "main-admin") {
     return "Main admin";
@@ -156,7 +166,7 @@ function AdminListSkeleton({ viewMode }: { viewMode: ViewMode }) {
     return (
       <div className="grid gap-3 md:grid-cols-2">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="animate-pulse rounded-md border p-4">
+          <div key={index} className="animate-pulse rounded-md border p-4 [animation-duration:1.6s] motion-reduce:animate-none">
             <div className="flex items-start gap-3">
               <div className="size-10 rounded-md bg-muted" />
               <div className="flex-1 space-y-2">
@@ -177,16 +187,16 @@ function AdminListSkeleton({ viewMode }: { viewMode: ViewMode }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-md border">
+    <div className="animate-pulse overflow-hidden rounded-md border [animation-duration:1.6s] motion-reduce:animate-none">
       <div className="grid grid-cols-[minmax(0,1.5fr)_1fr_0.7fr] gap-4 border-b bg-muted/40 px-4 py-3">
         {Array.from({ length: 3 }).map((_, index) => (
-          <div key={index} className="h-3 w-20 animate-pulse rounded bg-muted" />
+          <div key={index} className="h-3 w-20 rounded bg-muted" />
         ))}
       </div>
       {Array.from({ length: 5 }).map((_, index) => (
         <div
           key={index}
-          className="grid animate-pulse grid-cols-[minmax(0,1.5fr)_1fr_0.7fr] items-center gap-4 border-b px-4 py-4 last:border-0"
+          className="grid grid-cols-[minmax(0,1.5fr)_1fr_0.7fr] items-center gap-4 border-b px-4 py-4 last:border-0"
         >
           <div className="flex items-center gap-3">
             <div className="size-9 rounded-md bg-muted" />
@@ -208,7 +218,7 @@ function AdminListSkeleton({ viewMode }: { viewMode: ViewMode }) {
 
 function AdminSettingsSkeleton() {
   return (
-    <div className="animate-pulse space-y-6" aria-label="Loading admin settings" aria-busy="true">
+    <div className="animate-pulse space-y-6 [animation-duration:1.6s] motion-reduce:animate-none" aria-label="Loading admin settings" aria-busy="true">
       <div className="space-y-3">
         <div className="h-8 w-36 rounded-md bg-muted" />
         <div className="flex gap-2">
@@ -265,6 +275,7 @@ export function AdminSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionUserId, setActionUserId] = useState("");
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const filteredUsers = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -321,6 +332,9 @@ export function AdminSettings() {
         if (!isMounted) return;
 
         if (!response.ok) {
+          if (response.status === 401) {
+            setSessionExpired(true);
+          }
           setMessage(result.message ?? "Could not load admin settings.");
           return;
         }
@@ -363,6 +377,9 @@ export function AdminSettings() {
     const result = (await response.json()) as CreateAdminResponse;
 
     if (!response.ok || !result.user) {
+      if (response.status === 401) {
+        setSessionExpired(true);
+      }
       const nextMessage = result.message ?? "Could not add admin.";
       setMessage(nextMessage);
       toast.error(nextMessage);
@@ -377,12 +394,12 @@ export function AdminSettings() {
     setPage(1);
 
     if (result.setupLinkSent) {
-      const nextMessage = "Admin added. Password setup link sent by email.";
+      const nextMessage = `Admin added. First-time password setup link sent by email and expires in ${ADMIN_INVITATION_EXPIRY_DAYS} days.`;
       setMessage(nextMessage);
       toast.success(nextMessage);
     } else {
       const nextMessage =
-        "Admin added successfully. Email delivery is unavailable right now, so you can send the login details manually.";
+        `Admin added successfully. Email delivery is unavailable right now, so you can send the first-time login details manually. This setup access expires in ${ADMIN_INVITATION_EXPIRY_DAYS} days.`;
       setMessage(nextMessage);
       setFallbackPassword(result.temporaryPassword ?? "");
       toast.success("Admin added. Use the manual login details below.");
@@ -407,6 +424,9 @@ export function AdminSettings() {
     const result = (await response.json()) as { user?: AdminUser; message?: string };
 
     if (!response.ok || !result.user) {
+      if (response.status === 401) {
+        setSessionExpired(true);
+      }
       toast.error(result.message ?? "Could not update admin account.");
       setActionUserId("");
       return;
@@ -435,6 +455,9 @@ export function AdminSettings() {
     const result = (await response.json()) as { message?: string };
 
     if (!response.ok) {
+      if (response.status === 401) {
+        setSessionExpired(true);
+      }
       toast.error(result.message ?? "Could not delete admin account.");
       setActionUserId("");
       return;
@@ -525,6 +548,7 @@ export function AdminSettings() {
 
   return (
     <main className="min-h-svh bg-background text-foreground">
+      <SessionExpiryDialog open={sessionExpired} />
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
           <Link href="/admin" className="flex min-w-0 items-center gap-2 font-semibold">
@@ -599,8 +623,10 @@ export function AdminSettings() {
                 Add admin
               </CardTitle>
               <CardDescription>
-                We will email a password setup link. If delivery is unavailable,
-                you can share the login details manually.
+                Main admins can add any sub-admin here. We will email that new
+                admin a first-time password setup link that expires in{" "}
+                {ADMIN_INVITATION_EXPIRY_DAYS} days. If delivery is unavailable,
+                you can share the first-time login details manually.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -750,7 +776,6 @@ export function AdminSettings() {
                         <tr>
                           <th className="px-4 py-3 font-medium">Administrator</th>
                           <th className="px-4 py-3 font-medium">Email</th>
-                          <th className="px-4 py-3 font-medium">Access</th>
                           <th className="px-4 py-3 font-medium">Status</th>
                           {canModerateAdmins ? (
                             <th className="px-4 py-3 font-medium">Actions</th>
@@ -764,9 +789,22 @@ export function AdminSettings() {
                               <div className="flex gap-3">
                                 <AdminAvatar user={user} size="sm" />
                                 <div className="min-w-0">
-                                  <p className="font-medium">{user.name}</p>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="font-medium">{user.name}</p>
+                                    <Badge
+                                      variant="outline"
+                                      className="h-5 rounded-md px-1.5 text-[10px] font-medium text-muted-foreground"
+                                    >
+                                      {getRoleLabel(user)}
+                                    </Badge>
+                                  </div>
                                   <p className="text-xs text-muted-foreground">{user.designation}</p>
                                   <p className="mt-1 text-[11px] text-muted-foreground"> {formatDate(user.createdAt)}</p>
+                                  {getInvitationExpiryLabel(user) ? (
+                                    <p className="mt-1 text-[11px] text-muted-foreground">
+                                      {getInvitationExpiryLabel(user)}
+                                    </p>
+                                  ) : null}
                                 </div>
                               </div>
                               <div className="mt-3">
@@ -775,9 +813,6 @@ export function AdminSettings() {
                             </td>
                             <td className="max-w-64 break-all px-4 py-4 text-sm text-muted-foreground">
                               {user.email}
-                            </td>
-                            <td className="px-4 py-4">
-                              <Badge variant="outline">{getRoleLabel(user)}</Badge>
                             </td>
                             <td className="px-4 py-4"><StatusChip user={user} /></td>
                             {canModerateAdmins ? (
@@ -801,6 +836,11 @@ export function AdminSettings() {
                           <p className="truncate font-medium">{user.name}</p>
                           <p className="truncate text-sm text-muted-foreground">{user.designation}</p>
                           <p className="mt-1 text-[11px] text-muted-foreground">Added {formatDate(user.createdAt)}</p>
+                          {getInvitationExpiryLabel(user) ? (
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {getInvitationExpiryLabel(user)}
+                            </p>
+                          ) : null}
                         </div>
                         <StatusChip user={user} />
                       </div>

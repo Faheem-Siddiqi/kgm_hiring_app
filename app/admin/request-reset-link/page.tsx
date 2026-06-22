@@ -1,6 +1,6 @@
-import { ForgotPasswordForm } from "@/features/auth/components/forgot-password-form";
+import { RequestResetLinkForm } from "@/features/auth/components/request-reset-link-form";
 
-export default async function ForgotPasswordPage({
+export default async function RequestResetLinkPage({
   searchParams,
 }: {
   searchParams: Promise<{ email?: string }>;
@@ -9,7 +9,7 @@ export default async function ForgotPasswordPage({
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-background px-4 py-10 text-foreground">
-      <ForgotPasswordForm initialEmail={email} />
+      <RequestResetLinkForm initialEmail={email} />
     </main>
   );
 }

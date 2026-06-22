@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createPasswordReset } from "@/lib/admin-users";
-import { sendPasswordResetEmail } from "@/lib/admin-mailer";
+import { sendPasswordResetEmail } from "@/lib/mail/auth-mailer";
 import { withErrorHandler } from "@/lib/server-error";
 
 export const runtime = "nodejs";
@@ -21,7 +21,7 @@ export const POST = withErrorHandler(async (request: Request) => {
 
   if (!email) {
     return NextResponse.json(
-      { message: "Enter your admin email address." },
+      { message: "Enter the admin email address registered for this workspace." },
       { status: 400 },
     );
   }
@@ -32,7 +32,7 @@ export const POST = withErrorHandler(async (request: Request) => {
     return NextResponse.json({
       ok: true,
       message:
-        "If this email exists, a password reset link has been sent.",
+        "If this active admin email exists, a password reset link has been sent.",
     });
   }
 
@@ -43,7 +43,7 @@ export const POST = withErrorHandler(async (request: Request) => {
     ok: true,
     mail,
     message: mail.sent
-      ? "Password reset email sent."
+      ? "Password reset email sent to the registered admin email."
       : (mail.reason ?? "Reset link created, but email could not be sent."),
   });
 });

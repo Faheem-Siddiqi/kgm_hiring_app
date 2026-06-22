@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
   AdminUserError,
-  getPasswordResetTokenStatus,
-  resetPasswordWithToken,
+  getAdminInvitationTokenStatus,
+  setAdminPasswordWithInvitation,
 } from "@/lib/admin-users";
 import { withErrorHandler } from "@/lib/server-error";
 
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 
 export const GET = withErrorHandler(async (request: Request) => {
   const token = new URL(request.url).searchParams.get("token")?.trim() ?? "";
-  const status = await getPasswordResetTokenStatus(token);
+  const status = await getAdminInvitationTokenStatus(token);
   const responseStatus = status.valid ? 200 : 400;
 
   return NextResponse.json(status, { status: responseStatus });
@@ -28,7 +28,7 @@ export const POST = withErrorHandler(async (request: Request) => {
 
   if (!token) {
     return NextResponse.json(
-      { message: "Reset token is missing." },
+      { message: "Admin setup link is missing." },
       { status: 400 },
     );
   }
@@ -41,7 +41,7 @@ export const POST = withErrorHandler(async (request: Request) => {
   }
 
   try {
-    await resetPasswordWithToken(token, password);
+    await setAdminPasswordWithInvitation(token, password);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(
@@ -49,7 +49,7 @@ export const POST = withErrorHandler(async (request: Request) => {
         message:
           error instanceof Error
             ? error.message
-            : "Could not reset password.",
+            : "Could not set admin password.",
       },
       { status: error instanceof AdminUserError ? error.status : 400 },
     );

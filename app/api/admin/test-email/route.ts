@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { sendAdminTestEmail } from "@/lib/admin-mailer";
+import { sendAdminTestEmail } from "@/lib/mail/diagnostic-mailer";
 import { ADMIN_SESSION_COOKIE, getAdminSessionToken } from "@/lib/admin-session";
 import { validateAdminSessionToken } from "@/lib/admin-users";
 import { withErrorHandler } from "@/lib/server-error";
