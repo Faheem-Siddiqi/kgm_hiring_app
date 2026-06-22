@@ -1,7 +1,7 @@
 import "server-only";
 
-import type { PublicAdminUser } from "@/lib/admin-users";
 import { ADMIN_INVITATION_EXPIRY_DAYS } from "@/lib/admin-constants";
+import type { PublicAdminUser } from "@/lib/admin-users";
 import {
   sendApplicationMail,
   type MailResult,
@@ -177,15 +177,14 @@ export function sendAdminAccessRequestEmail({
       `Hello ${reviewer.name},`,
       "",
       `${requesterEmail} requested a KGM Hiring admin access invitation.`,
-      `Current account state: ${requestState}`,
+      
       "",
       requesterNote ? `Request note: ${requesterNote}` : "",
       "",
       "Please review this request in Admin Settings. If the person should have access, add them as a sub-admin or create a fresh invitation from the admin access screen.",
       adminSettingsUrl,
       "",
-      "This email is only a review request. No setup link was generated from the public request page.",
-      "",
+     ,
       "KGM Hiring Team",
     ].filter(Boolean).join("\n"),
     html: `
