@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "@/components/theme/theme-provider";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "KGM Hiring",
-  description: "KGM hiring assessment portal",
+  title: {
+    default: "KGM Hiring Portal",
+    template: "%s | KGM Hiring",
+  },
+  description: "Candidate assessments and hiring operations for KGM.",
 };
 
 export default function RootLayout({
@@ -20,14 +22,7 @@ export default function RootLayout({
         className="min-h-svh bg-background font-sans text-foreground antialiased"
         suppressHydrationWarning
       >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-        >
-          <div className="fixed right-4 top-4 z-50" suppressHydrationWarning>
-            <ThemeToggle />
-          </div>
+        <ThemeProvider>
           {children}
           <Toaster />
         </ThemeProvider>

@@ -1,16 +1,16 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useContext, useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
-import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
+import { ThemeContext } from "@/components/theme/theme-provider";
 
 function subscribe() {
   return () => {};
 }
 
 export function ThemeToggle() {
-  const { resolvedTheme, setTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useContext(ThemeContext);
   const mounted = useSyncExternalStore(
     subscribe,
     () => true,
@@ -21,12 +21,13 @@ export function ThemeToggle() {
     return (
       <Button
         variant="outline"
-        size="sm"
-        className="min-w-28 transition-all duration-300"
+        size="icon"
+        className="transition-all duration-300"
         disabled
+        aria-label="Toggle theme"
         suppressHydrationWarning
       >
-        Theme
+        <Sun className="size-4" />
       </Button>
     );
   }
@@ -38,13 +39,14 @@ export function ThemeToggle() {
   return (
     <Button
       variant="outline"
-      size="sm"
-      className="min-w-28 transition-all duration-300"
+      size="icon"
+      className="transition-all duration-300"
       onClick={() => setTheme(nextTheme)}
+      aria-label={`Switch to ${nextTheme} mode`}
+      title={`Switch to ${nextTheme} mode`}
       suppressHydrationWarning
     >
       <Icon className="size-4" />
-      {isDark ? "Light mode" : "Dark mode"}
     </Button>
   );
 }

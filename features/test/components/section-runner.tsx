@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -40,6 +39,9 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createViolation,
+  readActiveAssessmentSections,
+  readActiveJobAssessment,
+  subscribeToAdminData,
   saveAssessmentResult,
 } from "@/features/test/admin-storage";
 import {
@@ -47,10 +49,7 @@ import {
   exitAssessmentFullscreen,
   getAssessmentFullscreenElement,
 } from "@/features/test/assessment-fullscreen";
-import {
-  assessmentSections,
-  type AssessmentSection,
-} from "@/features/test/assessment-data";
+import { assessmentSections } from "@/features/test/assessment-data";
 import {
   getAnsweredCount,
   getTotalQuestionCount,
@@ -59,10 +58,21 @@ import {
 } from "@/features/test/assessment-storage";
 
 type SectionRunnerProps = {
-  section: AssessmentSection;
-  previousSectionSlug?: string;
-  nextSectionSlug?: string;
+  sectionSlug: string;
 };
+
+type QuestionStatus = "skipped" | "unanswered";
+
+const QUESTION_STATUS_KEY = "kgm-hiring-assessment-question-statuses";
+
+function readQuestionStatuses(): Record<string, QuestionStatus> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(QUESTION_STATUS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
 
 function getSectionDurationSeconds(time: string) {
   const match = time.match(/(\d+)/);
@@ -90,13 +100,20 @@ function subscribeToAnswers(onStoreChange: () => void) {
   };
 }
 
-export function SectionRunner({
-  section,
-  previousSectionSlug,
-  nextSectionSlug,
-}: SectionRunnerProps) {
+function subscribeToTestData(onStoreChange: () => void) {
+  const unsubscribeAnswers = subscribeToAnswers(onStoreChange);
+  const unsubscribeAdmin = subscribeToAdminData(onStoreChange);
+
+  return () => {
+    unsubscribeAnswers();
+    unsubscribeAdmin();
+  };
+}
+
+export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [questionStatuses, setQuestionStatuses] = useState<Record<string, QuestionStatus>>(() => readQuestionStatuses());
   const [showWindowWarning, setShowWindowWarning] = useState(false);
   const [showCompletionDialog, setShowCompletionDialog] = useState(false);
   const [isChangingSection, setIsChangingSection] = useState(false);
@@ -108,30 +125,38 @@ export function SectionRunner({
     "Submitted" | "Auto submitted"
   >("Submitted");
   const windowWarningQueuedRef = useRef(false);
-  const sectionDurationSeconds = getSectionDurationSeconds(section.time);
-  const timerStorageKey = `kgm-hiring-assessment-timer-${section.slug}`;
-  const [timeLeftSeconds, setTimeLeftSeconds] = useState(sectionDurationSeconds);
   const isStoppingAssessmentRef = useRef(false);
   const timerEndAtRef = useRef<number | null>(null);
+  const questionTimerEndAtRef = useRef<number | null>(null);
   const answersRef = useRef<Record<string, string>>({});
   const answersSnapshot = useSyncExternalStore(
-    subscribeToAnswers,
+    subscribeToTestData,
     readStoredAnswersSnapshot,
     () => "{}",
   );
   const answers = JSON.parse(answersSnapshot) as Record<string, string>;
+  const activeAssessment = readActiveJobAssessment();
+  const activeSections = readActiveAssessmentSections();
+  const section =
+    activeSections.find((item) => item.slug === sectionSlug) ??
+    assessmentSections.find((item) => item.slug === sectionSlug) ??
+    activeSections[0] ??
+    assessmentSections[0];
+  const sectionIndex = activeSections.findIndex((item) => item.slug === section.slug);
+  const previousSectionSlug = activeSections[sectionIndex - 1]?.slug;
+  const nextSectionSlug = activeSections[sectionIndex + 1]?.slug;
   const currentQuestion = section.questions[currentIndex];
-  const questionIds = useMemo(
-    () => section.questions.map((question) => question.id),
-    [section.questions],
-  );
-  const allQuestionIds = useMemo(
-    () =>
-      assessmentSections.flatMap((assessmentSection) =>
-        assessmentSection.questions.map((question) => question.id),
-      ),
-    [],
-  );
+  const sectionDurationSeconds = getSectionDurationSeconds(section.time);
+  const timerStorageKey = `kgm-hiring-assessment-timer-${section.slug}`;
+  const [timeLeftSeconds, setTimeLeftSeconds] = useState(sectionDurationSeconds);
+  const questionDurationSeconds =
+    currentQuestion.timeLimitSeconds ?? section.questionTimeSeconds ??
+    Math.max(1, Math.floor(sectionDurationSeconds / section.questions.length));
+  const questionTimerStorageKey = `kgm-hiring-assessment-question-timer-${section.slug}-${currentQuestion.id}`;
+  const questionRemainingStorageKey = `${questionTimerStorageKey}-remaining`;
+  const [questionTimeLeftSeconds, setQuestionTimeLeftSeconds] =
+    useState(questionDurationSeconds);
+  const questionIds = section.questions.map((question) => question.id);
   const answeredCount = getAnsweredCount(answers, questionIds);
   const sectionProgress = Math.round(
     (answeredCount / section.questions.length) * 100,
@@ -142,12 +167,21 @@ export function SectionRunner({
   const isFirstQuestion = currentIndex === 0;
   const isLastQuestion = currentIndex === section.questions.length - 1;
   const isTimeUp = timeLeftSeconds <= 0;
+  const isQuestionTimeUp = questionTimeLeftSeconds <= 0;
   const isLastMinute = timeLeftSeconds > 0 && timeLeftSeconds <= 60;
+  const isAnswerLocked = isTimeUp || isQuestionTimeUp;
+  const hasCurrentAnswer = Boolean(answers[currentQuestion.id]?.trim());
   const timerProgress = sectionDurationSeconds
     ? Math.round((timeLeftSeconds / sectionDurationSeconds) * 100)
     : 0;
+  const questionTimerProgress = questionDurationSeconds
+    ? Math.round((questionTimeLeftSeconds / questionDurationSeconds) * 100)
+    : 0;
   const totalQuestionCount = getTotalQuestionCount();
-  const totalAnsweredCount = getAnsweredCount(answers, allQuestionIds);
+  const activeQuestionIds = activeSections.flatMap((assessmentSection) =>
+    assessmentSection.questions.map((question) => question.id),
+  );
+  const totalAnsweredCount = getAnsweredCount(answers, activeQuestionIds);
 
   useEffect(() => {
     answersRef.current = answers;
@@ -291,6 +325,86 @@ export function SectionRunner({
   }, [sectionDurationSeconds, timerStorageKey]);
 
   useEffect(() => {
+    const storedEndAt = window.sessionStorage.getItem(questionTimerStorageKey);
+    const storedRemaining = window.sessionStorage.getItem(questionRemainingStorageKey);
+    const remainingSeconds = storedRemaining
+      ? Math.max(0, Number(storedRemaining))
+      : questionDurationSeconds;
+    const endAt = storedEndAt
+      ? Number(storedEndAt)
+      : Date.now() + remainingSeconds * 1000;
+    questionTimerEndAtRef.current = endAt;
+
+    if (!storedEndAt) {
+      window.sessionStorage.setItem(questionTimerStorageKey, String(endAt));
+      window.sessionStorage.removeItem(questionRemainingStorageKey);
+    }
+
+    function updateQuestionTimer() {
+      const timerEndAt = questionTimerEndAtRef.current ?? endAt;
+      const nextTimeLeft = Math.max(
+        0,
+        Math.ceil((timerEndAt - Date.now()) / 1000),
+      );
+      setQuestionTimeLeftSeconds(nextTimeLeft);
+    }
+
+    updateQuestionTimer();
+    const intervalId = window.setInterval(updateQuestionTimer, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [questionDurationSeconds, questionRemainingStorageKey, questionTimerStorageKey]);
+
+  function writeQuestionStatus(questionId: string, status: QuestionStatus) {
+    const next = { ...questionStatuses, [questionId]: status };
+    window.localStorage.setItem(QUESTION_STATUS_KEY, JSON.stringify(next));
+    setQuestionStatuses(next);
+  }
+
+  function pauseCurrentQuestionTimer() {
+    const remaining = questionTimeLeftSeconds;
+    window.sessionStorage.setItem(questionRemainingStorageKey, String(remaining));
+    window.sessionStorage.removeItem(questionTimerStorageKey);
+    questionTimerEndAtRef.current = null;
+  }
+
+  function moveToQuestion(index: number) {
+    if (isTimeUp || index === currentIndex) return;
+    pauseCurrentQuestionTimer();
+    setCurrentIndex(index);
+  }
+
+  function skipCurrentQuestion() {
+    writeQuestionStatus(currentQuestion.id, "skipped");
+    pauseCurrentQuestionTimer();
+    if (!isLastQuestion) {
+      setCurrentIndex((index) => index + 1);
+    }
+  }
+
+  useEffect(() => {
+    if (!isQuestionTimeUp || isTimeUp) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setQuestionStatuses((current) => {
+        const next: Record<string, QuestionStatus> = {
+          ...current,
+          [currentQuestion.id]: "unanswered",
+        };
+        window.localStorage.setItem(QUESTION_STATUS_KEY, JSON.stringify(next));
+        return next;
+      });
+      window.sessionStorage.setItem(questionRemainingStorageKey, "0");
+      window.sessionStorage.removeItem(questionTimerStorageKey);
+      if (!isLastQuestion) {
+        setCurrentIndex((index) => index + 1);
+      }
+    }, 400);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [currentQuestion.id, isLastQuestion, isQuestionTimeUp, isTimeUp, questionRemainingStorageKey, questionTimerStorageKey]);
+
+  useEffect(() => {
     router.prefetch("/test");
 
     if (previousSectionSlug) {
@@ -303,7 +417,7 @@ export function SectionRunner({
   }, [nextSectionSlug, previousSectionSlug, router]);
 
   function updateAnswer(questionId: string, value: string) {
-    if (isTimeUp) {
+    if (isAnswerLocked) {
       return;
     }
 
@@ -313,6 +427,25 @@ export function SectionRunner({
     };
 
     writeStoredAnswers(nextAnswers);
+  }
+
+  function toggleMultiAnswer(questionId: string, option: string) {
+    if (isAnswerLocked) {
+      return;
+    }
+
+    const existingValues = answers[questionId]
+      ? answers[questionId].split("||").filter(Boolean)
+      : [];
+    const isSelected = existingValues.includes(option);
+    const nextValues = isSelected
+      ? existingValues.filter((value) => value !== option)
+      : [...existingValues, option];
+
+    writeStoredAnswers({
+      ...answers,
+      [questionId]: nextValues.join("||"),
+    });
   }
 
   function preventContentCopy(event: React.ClipboardEvent | React.MouseEvent) {
@@ -379,6 +512,10 @@ export function SectionRunner({
                     <Clock3 className="size-3.5" />
                     {section.time}
                   </Badge>
+                  <Badge variant="outline" className="w-fit gap-2 font-mono">
+                    <Clock3 className="size-3.5" />
+                    Question {formatTimeLeft(questionTimeLeftSeconds)}
+                  </Badge>
                   <Badge
                     variant="outline"
                     className={[
@@ -431,6 +568,21 @@ export function SectionRunner({
                   </div>
                   <Progress value={questionProgress} />
                 </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium">Question time</span>
+                    <span
+                      className={
+                        isQuestionTimeUp
+                          ? "font-medium text-destructive"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      {formatTimeLeft(questionTimeLeftSeconds)}
+                    </span>
+                  </div>
+                  <Progress value={questionTimerProgress} />
+                </div>
               </CardContent>
             </Card>
 
@@ -442,6 +594,9 @@ export function SectionRunner({
               <CardContent className="grid gap-2">
                 {section.questions.map((question, index) => {
                   const isAnswered = Boolean(answers[question.id]?.trim());
+                  const status = questionStatuses[question.id];
+                  const canLeaveCurrentQuestion =
+                    hasCurrentAnswer || Boolean(questionStatuses[currentQuestion.id]);
 
                   return (
                     <Button
@@ -453,22 +608,21 @@ export function SectionRunner({
                       ].join(" ")}
                       key={question.id}
                       onClick={() => {
-                        if (!isTimeUp) {
-                          setCurrentIndex(index);
-                        }
+                        moveToQuestion(index);
                       }}
+                      disabled={isTimeUp || (!canLeaveCurrentQuestion && index !== currentIndex)}
                       variant="outline"
                     >
                       <span>Question {index + 1}</span>
                       <span
-                        aria-label={isAnswered ? "Answered" : "Pending"}
+                        aria-label={isAnswered ? "Answered" : status === "skipped" ? "Skipped" : status === "unanswered" ? "Timed out" : "Pending"}
                         className={[
                           "inline-flex size-6 items-center justify-center rounded-full border",
                           isAnswered
                             ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-600"
                             : "border-amber-500/30 bg-amber-500/15 text-amber-600",
                         ].join(" ")}
-                        title={isAnswered ? "Answered" : "Pending"}
+                        title={isAnswered ? "Answered" : status === "skipped" ? "Skipped" : status === "unanswered" ? "Timed out" : "Pending"}
                       >
                         {isAnswered ? (
                           <CheckCircle2 className="size-4" aria-hidden="true" />
@@ -491,7 +645,7 @@ export function SectionRunner({
                   All sections
                 </Link>
               </Button>
-              <Badge variant="outline">Assistant Admin Officer</Badge>
+              <Badge variant="outline">{activeAssessment.role}</Badge>
             </div>
 
             <Card>
@@ -507,14 +661,14 @@ export function SectionRunner({
                 {currentQuestion.type === "text" ? (
                   <Textarea
                     className="select-text"
-                    disabled={isTimeUp}
+                    disabled={isAnswerLocked}
                     placeholder="Type your answer here..."
                     value={answers[currentQuestion.id] ?? ""}
                     onChange={(event) =>
                       updateAnswer(currentQuestion.id, event.target.value)
                     }
                   />
-                ) : (
+                ) : currentQuestion.type === "mcq" ? (
                   <div className="grid gap-3">
                     {currentQuestion.options.map((option) => {
                       const isSelected = answers[currentQuestion.id] === option;
@@ -528,8 +682,42 @@ export function SectionRunner({
                               : "bg-background hover:bg-muted/60",
                           ].join(" ")}
                           key={option}
-                          disabled={isTimeUp}
+                          disabled={isAnswerLocked}
                           onClick={() => updateAnswer(currentQuestion.id, option)}
+                          type="button"
+                        >
+                          {option}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      You may select multiple options.
+                    </p>
+                    {currentQuestion.options.map((option) => {
+                      const selectedValues = (answers[currentQuestion.id] ?? "")
+                        .split("||")
+                        .filter(Boolean);
+                      const isSelected = selectedValues.includes(option);
+                      const isMaxed =
+                        !isSelected &&
+                        selectedValues.length >= currentQuestion.maxSelections;
+
+                      return (
+                        <button
+                          className={[
+                            "rounded-md border p-4 text-left text-sm transition-colors",
+                            isSelected
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "bg-background hover:bg-muted/60",
+                          ].join(" ")}
+                          key={option}
+                          disabled={isAnswerLocked || isMaxed}
+                          onClick={() =>
+                            toggleMultiAnswer(currentQuestion.id, option)
+                          }
                           type="button"
                         >
                           {option}
@@ -539,13 +727,18 @@ export function SectionRunner({
                   </div>
                 )}
 
+                {isQuestionTimeUp && !isTimeUp ? (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                    Time for this question has ended. You can move to another
+                    question, but this answer is locked.
+                  </div>
+                ) : null}
+
                 <div className="flex flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
                   <Button
-                    disabled={isFirstQuestion}
+                    disabled={isFirstQuestion || (!hasCurrentAnswer && !questionStatuses[currentQuestion.id])}
                     onClick={() => {
-                      if (!isTimeUp) {
-                        setCurrentIndex((index) => index - 1);
-                      }
+                      moveToQuestion(currentIndex - 1);
                     }}
                     variant="outline"
                   >
@@ -553,32 +746,52 @@ export function SectionRunner({
                     Back
                   </Button>
 
+                  <div className="grid grid-cols-2 gap-2 sm:flex">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isTimeUp || isQuestionTimeUp}
+                    onClick={skipCurrentQuestion}
+                  >
+                    Skip for now
+                  </Button>
                   {isLastQuestion ? (
                     nextSectionSlug ? (
-                      <Button asChild>
-                        <Link
-                          href={`/test/${nextSectionSlug}`}
-                          onClick={() => setIsChangingSection(true)}
-                        >
+                      hasCurrentAnswer ? (
+                        <Button asChild>
+                          <Link
+                            href={`/test/${nextSectionSlug}`}
+                            onClick={() => {
+                              pauseCurrentQuestionTimer();
+                              setIsChangingSection(true);
+                            }}
+                          >
+                            Next section
+                            <ArrowRight className="size-4" />
+                          </Link>
+                        </Button>
+                      ) : (
+                        <Button disabled>
                           Next section
                           <ArrowRight className="size-4" />
-                        </Link>
-                      </Button>
+                        </Button>
+                      )
                     ) : (
-                      <Button onClick={() => submitAssessment("Submitted")}>
+                      <Button disabled={!hasCurrentAnswer} onClick={() => submitAssessment("Submitted")}>
                         Submit Test
                         <Send className="size-4" />
                       </Button>
                     )
                   ) : (
                     <Button
-                      disabled={isTimeUp}
-                      onClick={() => setCurrentIndex((index) => index + 1)}
+                      disabled={isTimeUp || !hasCurrentAnswer}
+                      onClick={() => moveToQuestion(currentIndex + 1)}
                     >
                       Next
                       <ArrowRight className="size-4" />
                     </Button>
                   )}
+                  </div>
                 </div>
 
                 {previousSectionSlug ? (

@@ -7,8 +7,6 @@ export type UserRecord = {
 
 export type TestAttemptRecord = {
   id: string;
-  userId: string;
-  status: "pending" | "in_progress" | "submitted";
   createdAt: Date;
   updatedAt: Date;
 };

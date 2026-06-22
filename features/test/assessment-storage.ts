@@ -1,4 +1,5 @@
 import { assessmentSections } from "@/features/test/assessment-data";
+import { readActiveAssessmentSections } from "@/features/test/admin-storage";
 
 export type AssessmentAnswers = Record<string, string>;
 
@@ -35,7 +36,12 @@ export function getAnsweredCount(answers: AssessmentAnswers, questionIds: string
 }
 
 export function getTotalQuestionCount() {
-  return assessmentSections.reduce(
+  const sections =
+    typeof window === "undefined"
+      ? assessmentSections
+      : readActiveAssessmentSections();
+
+  return sections.reduce(
     (total, section) => total + section.questions.length,
     0,
   );

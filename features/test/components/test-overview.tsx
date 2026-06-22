@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import {
   ArrowRight,
-  BarChart3,
   CheckCircle2,
   Clock3,
   FileText,
@@ -31,7 +30,11 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { enterAssessmentFullscreen } from "@/features/test/assessment-fullscreen";
-import { assessmentSections } from "@/features/test/assessment-data";
+import {
+  readActiveAssessmentSections,
+  readActiveJobAssessment,
+  subscribeToAdminData,
+} from "@/features/test/admin-storage";
 import {
   getAnsweredCount,
   getTotalQuestionCount,
@@ -51,15 +54,27 @@ function subscribeToAnswers(onStoreChange: () => void) {
   };
 }
 
+function subscribeToTestData(onStoreChange: () => void) {
+  const unsubscribeAnswers = subscribeToAnswers(onStoreChange);
+  const unsubscribeAdmin = subscribeToAdminData(onStoreChange);
+
+  return () => {
+    unsubscribeAnswers();
+    unsubscribeAdmin();
+  };
+}
+
 export function TestOverview() {
   const [showCompletionDialog, setShowCompletionDialog] = useState(false);
   const [isOpeningSection, setIsOpeningSection] = useState(false);
   const answersSnapshot = useSyncExternalStore(
-    subscribeToAnswers,
+    subscribeToTestData,
     readStoredAnswersSnapshot,
     () => "{}",
   );
   const answers = JSON.parse(answersSnapshot) as Record<string, string>;
+  const activeAssessment = readActiveJobAssessment();
+  const assessmentSections = readActiveAssessmentSections();
   const totalQuestions = getTotalQuestionCount();
   const answeredQuestions = getAnsweredCount(
     answers,
@@ -81,23 +96,17 @@ export function TestOverview() {
         <div className="space-y-4">
           <Badge variant="secondary" className="gap-2">
             <CheckCircle2 className="size-3.5" />
-            Dummy authenticated session
+            Identity verified
           </Badge>
           <div className="max-w-3xl space-y-3">
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-              Assistant Admin Officer
+              {activeAssessment.role}
             </h1>
             <p className="text-base leading-7 text-muted-foreground sm:text-lg">
-              Select one section at a time. Answers are saved locally for this
-              frontend preview and progress updates as questions are completed.
+              Complete each section in order. Your responses are saved as you
+              work and your progress updates automatically.
             </p>
           </div>
-          <Button asChild variant="outline" className="w-fit">
-            <Link href="/admin">
-              <BarChart3 className="size-4" />
-              Admin dashboard
-            </Link>
-          </Button>
         </div>
 
         <Card>
@@ -169,7 +178,7 @@ export function TestOverview() {
               <div>
                 <p className="text-sm font-medium">Ready to submit?</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Submit becomes meaningful once all answers are connected to the backend.
+                  Review your responses before submitting the completed assessment.
                 </p>
               </div>
               <Button
@@ -189,24 +198,30 @@ export function TestOverview() {
         <Card>
           <CardHeader>
             <CardTitle>Test Overview</CardTitle>
-            <CardDescription>Assistant Admin Officer preview.</CardDescription>
+          <CardDescription>{activeAssessment.title}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3">
               <div className="rounded-md border bg-muted/30 p-4">
                 <Clock3 className="mb-3 size-5 text-muted-foreground" />
                 <p className="text-sm font-medium">Total duration</p>
-                <p className="mt-1 text-2xl font-semibold">45 min</p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {activeAssessment.sectionCount *
+                    activeAssessment.timePerSectionMinutes}{" "}
+                  min
+                </p>
               </div>
               <div className="rounded-md border bg-muted/30 p-4">
                 <FileText className="mb-3 size-5 text-muted-foreground" />
                 <p className="text-sm font-medium">Sections</p>
-                <p className="mt-1 text-2xl font-semibold">3</p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {assessmentSections.length}
+                </p>
               </div>
               <div className="rounded-md border bg-muted/30 p-4">
                 <ListChecks className="mb-3 size-5 text-muted-foreground" />
                 <p className="text-sm font-medium">Questions</p>
-                <p className="mt-1 text-2xl font-semibold">9</p>
+                <p className="mt-1 text-2xl font-semibold">{totalQuestions}</p>
               </div>
             </div>
           </CardContent>
@@ -222,8 +237,7 @@ export function TestOverview() {
             </div>
             <DialogTitle>Test submitted</DialogTitle>
             <DialogDescription>
-              Your assessment preview is complete. Saved answers remain on this
-              device until the backend submission endpoint is connected.
+              Your assessment has been completed and submitted for review.
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md border bg-muted/30 p-4 text-sm">

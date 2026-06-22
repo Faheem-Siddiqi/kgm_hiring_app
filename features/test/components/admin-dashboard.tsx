@@ -1,17 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState, useSyncExternalStore } from "react";
+import { FormEvent, useMemo, useState, useSyncExternalStore } from "react";
 import {
-  ArrowLeft,
+  ArrowRight,
+  Bell,
   BarChart3,
   BriefcaseBusiness,
   CheckCircle2,
+  Clock,
+  Copy,
+  FileText,
   Mail,
+  Menu,
+  LogOut,
   Plus,
-  Trophy,
-  UserPlus,
+  Send,
+  Settings,
+  ShieldCheck,
+  Users,
+  X,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,159 +35,539 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
 import {
   createCandidate,
   createJobAssessment,
   readAdminDataSnapshot,
   subscribeToAdminData,
+  updateJobAssessmentConfig,
   type AssessmentResult,
+  type Candidate,
+  type JobAssessment,
 } from "@/features/test/admin-storage";
+import { assessmentResourceSummaries } from "@/features/test/assessment-resources";
 
 type AdminSnapshot = {
-  candidates?: ReturnType<typeof import("@/features/test/admin-storage").readCandidates>;
-  jobs?: ReturnType<typeof import("@/features/test/admin-storage").readJobAssessments>;
+  candidates?: Candidate[];
+  jobs?: JobAssessment[];
   results?: AssessmentResult[];
 };
+
+type AdminNotification = {
+  id: string;
+  title: string;
+  description: string;
+  time: string;
+  tone: "default" | "warning" | "success";
+  href?: string;
+};
+
+const READ_NOTIFICATIONS_KEY = "kgm-hiring-admin-read-notifications";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
     dateStyle: "medium",
-    timeStyle: "short",
   }).format(new Date(value));
 }
 
-export function AdminDashboard() {
-  const [selectedAssessmentId, setSelectedAssessmentId] = useState("all");
-  const [assessmentTitle, setAssessmentTitle] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
-  const [candidateName, setCandidateName] = useState("");
-  const [candidateEmail, setCandidateEmail] = useState("");
-  const [candidateJobId, setCandidateJobId] = useState("");
+function useAdminData() {
   const snapshot = useSyncExternalStore(
     subscribeToAdminData,
     readAdminDataSnapshot,
     () => "{}",
   );
   const adminData = JSON.parse(snapshot) as AdminSnapshot;
-  const jobs = adminData.jobs ?? [];
-  const candidates = adminData.candidates ?? [];
-  const results = adminData.results ?? [];
+
+  return {
+    candidates: adminData.candidates ?? [],
+    jobs: adminData.jobs ?? [],
+    results: adminData.results ?? [],
+  };
+}
+
+function getAverageScore(results: AssessmentResult[]) {
+  if (!results.length) {
+    return 0;
+  }
+
+  return Math.round(
+    results.reduce((total, result) => total + result.score, 0) /
+      results.length,
+  );
+}
+
+function getAssessmentStats(
+  job: JobAssessment,
+  candidates: Candidate[],
+  results: AssessmentResult[],
+) {
+  const assignedCandidates = candidates.filter(
+    (candidate) => candidate.jobId === job.id,
+  );
+  const assessmentResults = results.filter(
+    (result) => result.assessmentId === job.id,
+  );
+
+  return {
+    assignedCandidates,
+    assessmentResults,
+    averageScore: getAverageScore(assessmentResults),
+    completionRate: assignedCandidates.length
+      ? Math.round((assessmentResults.length / assignedCandidates.length) * 100)
+      : 0,
+  };
+}
+
+function buildAdminNotifications(
+  jobs: JobAssessment[],
+  candidates: Candidate[],
+  results: AssessmentResult[],
+) {
+  const resultNotifications: AdminNotification[] = results.slice(0, 3).map(
+    (result) => ({
+      id: `result-${result.id}`,
+      title: `${result.candidateName} submitted`,
+      description: `${result.assessmentTitle} scored ${result.score}%`,
+      time: formatDate(result.submittedAt),
+      tone: result.status === "Auto submitted" ? "warning" : "success",
+      href: `/admin/${result.assessmentId}?submission=${result.id}`,
+    }),
+  );
+  const pendingInvites = candidates.filter(
+    (candidate) =>
+      !results.some((result) => result.candidateEmail === candidate.email),
+  );
+  const inviteNotifications: AdminNotification[] = pendingInvites
+    .slice(0, 2)
+    .map((candidate) => ({
+      id: `invite-${candidate.id}`,
+      title: "Invite awaiting submission",
+      description: `${candidate.name} has OTP ${candidate.otpCode}`,
+      time: formatDate(candidate.invitedAt),
+      tone: "default",
+      href: `/admin/${candidate.jobId}`,
+    }));
+  const assessmentNotifications: AdminNotification[] = jobs.slice(0, 2).map(
+    (job) => ({
+      id: `assessment-${job.id}`,
+      title: "Assessment available",
+      description: `${job.role} is ready for candidate invites`,
+      time: formatDate(job.createdAt),
+      tone: "default",
+      href: `/admin/${job.id}`,
+    }),
+  );
+
+  return [
+    ...resultNotifications,
+    ...inviteNotifications,
+    ...assessmentNotifications,
+  ];
+}
+
+function readNotificationIds() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    return JSON.parse(
+      window.localStorage.getItem(READ_NOTIFICATIONS_KEY) ?? "[]",
+    ) as string[];
+  } catch {
+    return [];
+  }
+}
+
+function writeNotificationIds(ids: string[]) {
+  window.localStorage.setItem(READ_NOTIFICATIONS_KEY, JSON.stringify(ids));
+}
+
+export function AdminDashboard() {
+  const [navOpen, setNavOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [readNotifications, setReadNotifications] = useState<string[]>(() =>
+    readNotificationIds(),
+  );
+  const [assessmentTitle, setAssessmentTitle] = useState("");
+  const [resourceId, setResourceId] = useState(
+    assessmentResourceSummaries[0]?.id ?? "",
+  );
+  const [sectionCount, setSectionCount] = useState(3);
+  const [questionsPerSection, setQuestionsPerSection] = useState(20);
+  const [timePerSectionMinutes, setTimePerSectionMinutes] = useState(15);
+  const [candidateName, setCandidateName] = useState("");
+  const [candidateEmail, setCandidateEmail] = useState("");
+  const [candidateJobId, setCandidateJobId] = useState("");
+  const [lastInvite, setLastInvite] = useState<Candidate | null>(null);
+  const { candidates, jobs, results } = useAdminData();
   const activeCandidateJobId = candidateJobId || jobs[0]?.id || "";
-  const visibleResults =
-    selectedAssessmentId === "all"
-      ? results
-      : results.filter((result) => result.assessmentId === selectedAssessmentId);
-  const topCandidates = [...visibleResults]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
-  const averageScore = visibleResults.length
-    ? Math.round(
-        visibleResults.reduce((total, result) => total + result.score, 0) /
-          visibleResults.length,
-      )
-    : 0;
-  const autoSubmittedCount = visibleResults.filter(
-    (result) => result.status === "Auto submitted",
+  const latestResults = useMemo(() => results.slice(0, 4), [results]);
+  const notifications = useMemo(
+    () => buildAdminNotifications(jobs, candidates, results).slice(0, 6),
+    [jobs, candidates, results],
+  );
+  const unreadNotifications = notifications.filter(
+    (notification) => !readNotifications.includes(notification.id),
+  );
+  const averageScore = getAverageScore(results);
+  const completedCount = results.filter(
+    (result) => result.status === "Submitted",
   ).length;
+  const selectedResource = assessmentResourceSummaries.find(
+    (resource) => resource.id === resourceId,
+  );
 
   function handleCreateAssessment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!assessmentTitle.trim() || !jobTitle.trim()) {
+    if (!assessmentTitle.trim() || !selectedResource) {
+      toast.error("Assessment name and question bank are required");
       return;
     }
 
-    const job = createJobAssessment(assessmentTitle.trim(), jobTitle.trim());
-    setSelectedAssessmentId(job.id);
+    if (sectionCount > selectedResource.sectionCount) {
+      toast.error(
+        `${selectedResource.role} has only ${selectedResource.sectionCount} sections`,
+      );
+      return;
+    }
+
+    if (questionsPerSection > selectedResource.maxQuestionsPerSection) {
+      toast.error(
+        `Each ${selectedResource.role} section has up to ${selectedResource.maxQuestionsPerSection} questions`,
+      );
+      return;
+    }
+
+    const job = createJobAssessment({
+      title: assessmentTitle.trim(),
+      resourceId: selectedResource.id,
+      sectionCount,
+      timePerSectionMinutes,
+      questionsPerSection,
+    });
     setCandidateJobId(job.id);
     setAssessmentTitle("");
-    setJobTitle("");
-    toast.success("Assessment created for job");
+    toast.success("Assessment created");
   }
 
-  function handleAddCandidate(event: FormEvent<HTMLFormElement>) {
+  function handleSendInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!candidateName.trim() || !candidateEmail.trim() || !activeCandidateJobId) {
+      toast.error("Candidate name, email, and assessment are required");
       return;
     }
 
-    createCandidate(
+    const candidate = createCandidate(
       candidateName.trim(),
       candidateEmail.trim(),
       activeCandidateJobId,
     );
-    toast.success(`Email sent to ${candidateEmail.trim()}`);
+    setLastInvite(candidate);
+    toast.success(`Invite email prepared for ${candidate.email}`);
     setCandidateName("");
     setCandidateEmail("");
   }
 
+  async function copyInviteCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success("OTP copied");
+    } catch {
+      toast.error("Could not copy OTP");
+    }
+  }
+
+  function markNotificationRead(id: string) {
+    setReadNotifications((current) => {
+      const next = current.includes(id) ? current : [...current, id];
+      writeNotificationIds(next);
+      return next;
+    });
+  }
+
+  function markAllNotificationsRead() {
+    const next = notifications.map((notification) => notification.id);
+    setReadNotifications(next);
+    writeNotificationIds(next);
+    toast.success("Notifications marked as read");
+  }
+
+  function handleConfigChange(
+    job: JobAssessment,
+    field:
+      | "sectionCount"
+      | "timePerSectionMinutes"
+      | "questionsPerTest"
+      | "questionsPerSection"
+      | "dummyQuestionsPerSection",
+    value: string,
+  ) {
+    updateJobAssessmentConfig(job.id, {
+      sectionCount: job.sectionCount,
+      timePerSectionMinutes: job.timePerSectionMinutes,
+      questionsPerTest: job.questionsPerTest,
+      questionsPerSection: job.questionsPerSection,
+      dummyQuestionsPerSection: job.dummyQuestionsPerSection,
+      [field]: Number(value),
+    });
+  }
+
+  async function handleSignOut() {
+    await fetch("/api/admin/session", { method: "DELETE" });
+    window.location.assign("/admin/login");
+  }
+
   return (
-    <main className="min-h-svh bg-background px-4 py-16 text-foreground sm:px-6 lg:px-8">
-      <section className="mx-auto w-full max-w-7xl space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-2">
-            <Badge variant="secondary" className="gap-2">
-              <BarChart3 className="size-3.5" />
-              Admin
-            </Badge>
-            <h1 className="text-3xl font-semibold tracking-tight">
-              Assessment control
-            </h1>
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Create job assessments, invite candidates, and review assessment
-              results from one focused workspace.
-            </p>
+    <main className="min-h-svh bg-background text-foreground">
+      <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
+        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+          <Link href="/admin" className="flex items-center gap-2 font-semibold">
+            <span className="flex size-9 items-center justify-center rounded-md border bg-card">
+              <ShieldCheck className="size-4" />
+            </span>
+            KGM Hiring Workspace
+          </Link>
+          <nav className="hidden items-center gap-1 md:flex">
+            <Button asChild variant="ghost" size="sm">
+              <a href="#overview">Overview</a>
+            </Button>
+            <Button asChild variant="ghost" size="sm">
+              <a href="#assessments">Assessments</a>
+            </Button>
+            <Button asChild variant="ghost" size="sm">
+              <a href="#invites">Invites</a>
+            </Button>
+            <Button asChild variant="ghost" size="sm">
+              <a href="#notifications">Notifications</a>
+            </Button>
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/admin/settings">Settings</Link>
+            </Button>
+          </nav>
+          <div className="hidden items-center gap-2 md:flex">
+            <div className="relative">
+              <Button
+                aria-label="Open admin notifications"
+                size="icon"
+                variant="outline"
+                onClick={() => setNotificationsOpen((value) => !value)}
+              >
+                <Bell className="size-4" />
+                {notifications.length ? (
+                  <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                    {unreadNotifications.length}
+                  </span>
+                ) : null}
+              </Button>
+              {notificationsOpen ? (
+                <div className="absolute right-0 top-11 z-30 w-[360px] rounded-lg border bg-card p-3 text-card-foreground shadow-lg">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium">Notifications</p>
+                      <p className="text-xs text-muted-foreground">
+                        {unreadNotifications.length} unread admin updates
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={markAllNotificationsRead}
+                      disabled={!unreadNotifications.length}
+                    >
+                      Mark all read
+                    </Button>
+                    <Button
+                      aria-label="Close notifications"
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setNotificationsOpen(false)}
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {notifications.map((notification) => (
+                      <div
+                        key={notification.id}
+                        className="rounded-md border bg-background p-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-medium">
+                            {notification.title}
+                          </p>
+                          <Badge
+                            variant={
+                              notification.tone === "warning"
+                                ? "secondary"
+                                : notification.tone === "success"
+                                  ? "default"
+                                  : "outline"
+                            }
+                          >
+                            {notification.tone === "warning"
+                              ? "Review"
+                              : notification.tone === "success"
+                                ? "New"
+                                : "Info"}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {notification.description}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {notification.time}
+                        </p>
+                        <div className="mt-3 flex items-center justify-between gap-2">
+                          {notification.href ? (
+                            <Button asChild size="sm" variant="outline">
+                              <Link
+                                href={notification.href}
+                                onClick={() => markNotificationRead(notification.id)}
+                              >
+                                Open
+                              </Link>
+                            </Button>
+                          ) : null}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => markNotificationRead(notification.id)}
+                            disabled={readNotifications.includes(notification.id)}
+                          >
+                            {readNotifications.includes(notification.id)
+                              ? "Read"
+                              : "Mark read"}
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    {!notifications.length ? (
+                      <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                        No notifications yet.
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <ThemeToggle />
+            <Button variant="outline" size="sm" onClick={handleSignOut}>
+              <LogOut className="size-4" />
+              Sign out
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/admin/settings">
+                <Settings className="size-4" />
+                Settings
+              </Link>
+            </Button>
+            <Button asChild size="sm">
+              <a href="#create">
+                <Plus className="size-4" />
+                New assessment
+              </a>
+            </Button>
           </div>
-          <Button asChild variant="outline">
-            <Link href="/test">
-              <ArrowLeft className="size-4" />
-              Return to assessment
-            </Link>
+          <Button
+            aria-label="Toggle navigation"
+            className="md:hidden"
+            size="icon"
+            variant="outline"
+            onClick={() => setNavOpen((value) => !value)}
+          >
+            <Menu className="size-4" />
           </Button>
         </div>
+        {navOpen ? (
+          <div className="border-t px-4 py-3 md:hidden">
+            <div className="mx-auto grid max-w-7xl gap-2">
+              {[
+                "overview",
+                "assessments",
+                "invites",
+                "notifications",
+                "settings",
+                "create",
+              ].map((item) => (
+                <Button key={item} asChild variant="ghost" className="justify-start">
+                  <Link
+                    href={item === "settings" ? "/admin/settings" : `#${item}`}
+                    onClick={() => setNavOpen(false)}
+                  >
+                    {item[0].toUpperCase() + item.slice(1)}
+                  </Link>
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </header>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardContent className="p-4">
-              <BriefcaseBusiness className="mb-3 size-5 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Assessments</p>
-              <p className="mt-1 text-2xl font-semibold">{jobs.length}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <UserPlus className="mb-3 size-5 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Candidates</p>
-              <p className="mt-1 text-2xl font-semibold">{candidates.length}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <CheckCircle2 className="mb-3 size-5 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Submissions</p>
-              <p className="mt-1 text-2xl font-semibold">
-                {visibleResults.length}
+      <section className="mx-auto w-full max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+        <div id="overview" className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="space-y-4">
+            <Badge variant="secondary" className="w-fit gap-2">
+              <BarChart3 className="size-3.5" />
+              Hiring operations
+            </Badge>
+            <div className="space-y-3">
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                Recruitment assessment workspace
+              </h1>
+              <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
+                Create role-specific assessments, send candidate email invites
+                with OTP codes, and open each assessment for focused analytics.
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
           <Card>
-            <CardContent className="p-4">
-              <Trophy className="mb-3 size-5 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Average score</p>
-              <p className="mt-1 text-2xl font-semibold">{averageScore}%</p>
+            <CardHeader>
+              <CardTitle>Pipeline health</CardTitle>
+              <CardDescription>Current assessment activity at a glance.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-3">
+              {[
+                {
+                  label: "Assessments",
+                  value: jobs.length,
+                  icon: BriefcaseBusiness,
+                },
+                {
+                  label: "Candidates",
+                  value: candidates.length,
+                  icon: Users,
+                },
+                {
+                  label: "Submissions",
+                  value: results.length,
+                  icon: CheckCircle2,
+                },
+                {
+                  label: "Avg. score",
+                  value: `${averageScore}%`,
+                  icon: BarChart3,
+                },
+              ].map(({ label, value, icon: Icon }) => (
+                <div key={label} className="rounded-md border p-4">
+                  <Icon className="mb-3 size-4 text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p className="mt-1 text-2xl font-semibold">{value}</p>
+                </div>
+              ))}
             </CardContent>
           </Card>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[0.9fr_1.4fr]">
-          <div className="space-y-6">
+        <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <div id="create" className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>Create assessment</CardTitle>
                 <CardDescription>
-                  Build a new assessment entry for a specific job.
+                  Add a new assessment for a specific role.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -188,17 +578,83 @@ export function AdminDashboard() {
                       id="assessment-title"
                       value={assessmentTitle}
                       onChange={(event) => setAssessmentTitle(event.target.value)}
-                      placeholder="Admin Officer Screening"
+                      placeholder="Finance Officer Screening"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="job-title">Specific job</Label>
-                    <Input
-                      id="job-title"
-                      value={jobTitle}
-                      onChange={(event) => setJobTitle(event.target.value)}
-                      placeholder="Assistant Admin Officer"
-                    />
+                    <Label htmlFor="resource-id">Question bank</Label>
+                    <select
+                      id="resource-id"
+                      className="flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      value={resourceId}
+                      onChange={(event) => {
+                        const nextResource = assessmentResourceSummaries.find(
+                          (resource) => resource.id === event.target.value,
+                        );
+                        setResourceId(event.target.value);
+                        if (nextResource) {
+                          setSectionCount((value) =>
+                            Math.min(value, nextResource.sectionCount),
+                          );
+                          setQuestionsPerSection((value) =>
+                            Math.min(value, nextResource.maxQuestionsPerSection),
+                          );
+                        }
+                      }}
+                    >
+                      {assessmentResourceSummaries.map((resource) => (
+                        <option key={resource.id} value={resource.id}>
+                          {resource.role}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedResource ? (
+                      <p className="text-xs text-muted-foreground">
+                        Limit: {selectedResource.sectionCount} sections,{" "}
+                        {selectedResource.maxQuestionsPerSection} questions per
+                        section.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="section-count">Sections</Label>
+                      <Input
+                        id="section-count"
+                        type="number"
+                        min={1}
+                        max={selectedResource?.sectionCount ?? 1}
+                        value={sectionCount}
+                        onChange={(event) =>
+                          setSectionCount(Number(event.target.value))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="question-count">Questions / section</Label>
+                      <Input
+                        id="question-count"
+                        type="number"
+                        min={1}
+                        max={selectedResource?.maxQuestionsPerSection ?? 1}
+                        value={questionsPerSection}
+                        onChange={(event) =>
+                          setQuestionsPerSection(Number(event.target.value))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="section-time">Minutes / section</Label>
+                      <Input
+                        id="section-time"
+                        type="number"
+                        min={1}
+                        value={timePerSectionMinutes}
+                        onChange={(event) =>
+                          setTimePerSectionMinutes(Number(event.target.value))
+                        }
+                      />
+                    </div>
                   </div>
                   <Button className="w-full" type="submit">
                     <Plus className="size-4" />
@@ -208,15 +664,15 @@ export function AdminDashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card id="invites">
               <CardHeader>
-                <CardTitle>Add candidate</CardTitle>
+                <CardTitle>Email invite</CardTitle>
                 <CardDescription>
-                  Assign a candidate to a job and simulate the email invite.
+                  Assign an assessment and generate a secure candidate access code.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form className="space-y-4" onSubmit={handleAddCandidate}>
+                <form className="space-y-4" onSubmit={handleSendInvite}>
                   <div className="space-y-2">
                     <Label htmlFor="candidate-name">Candidate name</Label>
                     <Input
@@ -237,7 +693,7 @@ export function AdminDashboard() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Assign to job</Label>
+                    <Label>Assessment</Label>
                     <div className="grid gap-2">
                       {jobs.map((job) => (
                         <Button
@@ -246,6 +702,7 @@ export function AdminDashboard() {
                           variant={
                             activeCandidateJobId === job.id ? "default" : "outline"
                           }
+                          className="justify-start"
                           onClick={() => setCandidateJobId(job.id)}
                         >
                           {job.role}
@@ -254,89 +711,252 @@ export function AdminDashboard() {
                     </div>
                   </div>
                   <Button className="w-full" type="submit">
-                    <Mail className="size-4" />
-                    Send invite
+                    <Send className="size-4" />
+                    Send email
                   </Button>
                 </form>
+
+                {lastInvite ? (
+                  <div className="mt-4 rounded-md border bg-muted/30 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{lastInvite.email}</p>
+                        <p className="text-xs text-muted-foreground">
+                          OTP code: {lastInvite.otpCode}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => copyInviteCode(lastInvite.otpCode)}
+                      >
+                        <Copy className="size-4" />
+                        Copy code
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card id="notifications">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>Admin notifications</CardTitle>
+                    <CardDescription>
+                      Priority updates from invites, submissions, and assessments.
+                    </CardDescription>
+                  </div>
+                  <Badge variant="secondary" className="gap-1">
+                    <Bell className="size-3" />
+                    {unreadNotifications.length} unread
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {notifications.map((notification) => (
+                  <div
+                    key={notification.id}
+                    className="rounded-md border bg-muted/20 p-4"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="font-medium">{notification.title}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {notification.description}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={
+                          notification.tone === "warning"
+                            ? "secondary"
+                            : notification.tone === "success"
+                              ? "default"
+                              : "outline"
+                        }
+                      >
+                        {notification.tone === "warning"
+                          ? "Needs review"
+                          : notification.tone === "success"
+                            ? "Fresh"
+                            : "General"}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span>{notification.time}</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => markNotificationRead(notification.id)}
+                        disabled={readNotifications.includes(notification.id)}
+                      >
+                        {readNotifications.includes(notification.id)
+                          ? "Read"
+                          : "Mark as read"}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {!notifications.length ? (
+                  <div className="rounded-md border bg-muted/30 p-6 text-sm text-muted-foreground">
+                    No notifications yet.
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           </div>
 
-          <div className="space-y-6">
+          <div id="assessments" className="space-y-6">
             <Card>
-              <CardHeader className="gap-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-1.5">
-                    <CardTitle>Results</CardTitle>
-                    <CardDescription>
-                      View all assessments or filter to one specific assessment.
-                    </CardDescription>
-                  </div>
-                  <Badge variant="outline">
-                    {autoSubmittedCount} auto submitted
-                  </Badge>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    type="button"
-                    variant={selectedAssessmentId === "all" ? "default" : "outline"}
-                    onClick={() => setSelectedAssessmentId("all")}
-                  >
-                    All assessments
-                  </Button>
-                  {jobs.map((job) => (
-                    <Button
-                      key={job.id}
-                      size="sm"
-                      type="button"
-                      variant={
-                        selectedAssessmentId === job.id ? "default" : "outline"
-                      }
-                      onClick={() => setSelectedAssessmentId(job.id)}
-                    >
-                      {job.role}
-                    </Button>
-                  ))}
-                </div>
+              <CardHeader>
+                <CardTitle>Assessments</CardTitle>
+                <CardDescription>
+                  Open one assessment to view its own KPIs, graphs, candidates,
+                  and CV preview.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {visibleResults.length ? (
-                  visibleResults.map((result) => (
-                    <div
-                      key={result.id}
-                      className="rounded-md border bg-card p-4"
+              <CardContent className="space-y-3">
+                {jobs.map((job) => {
+                  const stats = getAssessmentStats(job, candidates, results);
+
+                  return (
+                    <Link
+                      key={job.id}
+                      href={`/admin/${job.id}`}
+                      className="group block rounded-lg border p-4 transition hover:border-foreground/30 hover:bg-muted/35"
                     >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <p className="font-medium">{result.candidateName}</p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {result.assessmentTitle} · {result.candidateEmail}
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 space-y-1">
+                          <p className="font-medium">{job.title}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {job.role} - created {formatDate(job.createdAt)}
                           </p>
                         </div>
-                        <Badge
-                          variant={
-                            result.status === "Auto submitted"
-                              ? "secondary"
-                              : "outline"
-                          }
-                        >
-                          {result.status}
-                        </Badge>
-                      </div>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-                        <Progress value={result.score} />
-                        <span className="text-sm font-medium">
-                          {result.score}%
+                        <span className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition group-hover:bg-accent sm:w-auto">
+                          Open analytics
+                          <ArrowRight className="size-4" />
                         </span>
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                        <span>
-                          {result.answeredCount}/{result.totalQuestions} answered
-                        </span>
-                        <span>{formatDate(result.submittedAt)}</span>
-                        <span>{result.violations.length} violations</span>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Invited</p>
+                          <p className="text-lg font-semibold">
+                            {stats.assignedCandidates.length}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Complete</p>
+                          <p className="text-lg font-semibold">
+                            {stats.completionRate}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Avg. score</p>
+                          <p className="text-lg font-semibold">
+                            {stats.averageScore}%
+                          </p>
+                        </div>
                       </div>
+                      <div className="mt-4 grid gap-2 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-4">
+                        <span>{job.sectionCount} sections</span>
+                        <span>{job.timePerSectionMinutes} min each</span>
+                        <span>{job.questionsPerSection} questions each</span>
+                        <span>{job.dummyQuestionsPerSection} dummy each</span>
+                      </div>
+                      <Progress className="mt-4" value={stats.completionRate} />
+                    </Link>
+                  );
+                })}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Assessment setup</CardTitle>
+                <CardDescription>
+                  Edit section count, timing, dictionary question pick size, and
+                  dummy questions per section.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {jobs.map((job) => (
+                  <div key={job.id} className="rounded-md border p-4">
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{job.title}</p>
+                        <p className="text-sm text-muted-foreground">{job.role}</p>
+                      </div>
+                      <Badge variant="outline" className="gap-1">
+                        <Clock className="size-3" />
+                        editable
+                      </Badge>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {[
+                        ["sectionCount", "Sections"],
+                        ["timePerSectionMinutes", "Minutes / section"],
+                        ["questionsPerSection", "Questions / section"],
+                        ["dummyQuestionsPerSection", "Dummy questions / section"],
+                      ].map(([field, label]) => (
+                        <div key={field} className="space-y-2">
+                          <Label htmlFor={`${job.id}-${field}`}>{label}</Label>
+                          <Input
+                            id={`${job.id}-${field}`}
+                            type="number"
+                            min={field === "dummyQuestionsPerSection" ? 0 : 1}
+                            value={String(
+                              job[field as keyof Pick<
+                                JobAssessment,
+                                | "sectionCount"
+                                | "timePerSectionMinutes"
+                                | "questionsPerSection"
+                                | "dummyQuestionsPerSection"
+                              >],
+                            )}
+                            onChange={(event) =>
+                              handleConfigChange(
+                                job,
+                                field as
+                                  | "sectionCount"
+                                  | "timePerSectionMinutes"
+                                  | "questionsPerSection"
+                                  | "dummyQuestionsPerSection",
+                                event.target.value,
+                              )
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent submissions</CardTitle>
+                <CardDescription>
+                  Latest candidate activity across all assessments.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {latestResults.length ? (
+                  latestResults.map((result) => (
+                    <div
+                      key={result.id}
+                      className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium">{result.candidateName}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {result.assessmentTitle}
+                        </p>
+                      </div>
+                      <Badge variant={result.status === "Submitted" ? "default" : "secondary"}>
+                        {result.score}%
+                      </Badge>
                     </div>
                   ))
                 ) : (
@@ -344,55 +964,17 @@ export function AdminDashboard() {
                     No submissions yet. Completed tests will appear here.
                   </div>
                 )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Top candidates</CardTitle>
-                <CardDescription>
-                  Graphical ranking for the selected assessment scope.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {topCandidates.length ? (
-                  topCandidates.map((candidate, index) => (
-                    <div key={candidate.id} className="space-y-2">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-medium">
-                          {index + 1}. {candidate.candidateName}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {candidate.score}%
-                        </span>
-                      </div>
-                      <Progress value={candidate.score} />
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-md border bg-muted/30 p-6 text-sm text-muted-foreground">
-                    Top candidates will be ranked after submissions.
-                  </div>
-                )}
-                <Separator />
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {jobs.map((job) => {
-                    const assignedCount = candidates.filter(
-                      (candidate) => candidate.jobId === job.id,
-                    ).length;
-
-                    return (
-                      <div key={job.id} className="rounded-md border p-4">
-                        <p className="text-sm font-medium">{job.role}</p>
-                        <p className="mt-1 text-2xl font-semibold">
-                          {assignedCount}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          assigned candidates
-                        </p>
-                      </div>
-                    );
-                  })}
+                  <div className="rounded-md border p-4">
+                    <Mail className="mb-3 size-4 text-muted-foreground" />
+                    <p className="text-2xl font-semibold">{candidates.length}</p>
+                    <p className="text-xs text-muted-foreground">email invites</p>
+                  </div>
+                  <div className="rounded-md border p-4">
+                    <FileText className="mb-3 size-4 text-muted-foreground" />
+                    <p className="text-2xl font-semibold">{completedCount}</p>
+                    <p className="text-xs text-muted-foreground">review-ready CVs</p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
