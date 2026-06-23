@@ -12,16 +12,12 @@ import {
   Copy,
   FileText,
   Mail,
-  Menu,
-  LogOut,
   Plus,
   Send,
-  Settings,
-  ShieldCheck,
   Users,
   X,
 } from "lucide-react";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -184,7 +180,6 @@ function writeNotificationIds(ids: string[]) {
 }
 
 export function AdminDashboard() {
-  const [navOpen, setNavOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [readNotifications, setReadNotifications] = useState<string[]>(() =>
     readNotificationIds(),
@@ -315,196 +310,103 @@ export function AdminDashboard() {
     });
   }
 
-  async function handleSignOut() {
-    await fetch("/api/admin/session", { method: "DELETE" });
-    window.location.assign("/admin/login");
-  }
-
   return (
     <main className="min-h-svh bg-background text-foreground">
-      <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Link href="/admin" className="flex items-center gap-2 font-semibold">
-            <span className="flex size-9 items-center justify-center rounded-md border bg-card">
-              <ShieldCheck className="size-4" />
-            </span>
-            KGM Hiring Workspace
-          </Link>
-          <nav className="hidden items-center gap-1 md:flex">
-            <Button asChild variant="ghost" size="sm">
-              <a href="#overview">Overview</a>
-            </Button>
-            <Button asChild variant="ghost" size="sm">
-              <a href="#assessments">Assessments</a>
-            </Button>
-            <Button asChild variant="ghost" size="sm">
-              <a href="#invites">Invites</a>
-            </Button>
-            <Button asChild variant="ghost" size="sm">
-              <a href="#notifications">Notifications</a>
-            </Button>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/admin/settings">Settings</Link>
-            </Button>
-          </nav>
-          <div className="hidden items-center gap-2 md:flex">
-            <div className="relative">
+      <AdminNavbar
+        notificationCount={unreadNotifications.length}
+        notificationsOpen={notificationsOpen}
+        onToggleNotifications={() => setNotificationsOpen((value) => !value)}
+        notificationPanel={
+          <div className="absolute right-0 top-11 z-30 w-[360px] rounded-lg border bg-card p-3 text-card-foreground shadow-lg">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-medium">Notifications</p>
+                <p className="text-xs text-muted-foreground">
+                  {unreadNotifications.length} unread admin updates
+                </p>
+              </div>
               <Button
-                aria-label="Open admin notifications"
-                size="icon"
-                variant="outline"
-                onClick={() => setNotificationsOpen((value) => !value)}
+                size="sm"
+                variant="ghost"
+                onClick={markAllNotificationsRead}
+                disabled={!unreadNotifications.length}
               >
-                <Bell className="size-4" />
-                {notifications.length ? (
-                  <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
-                    {unreadNotifications.length}
-                  </span>
-                ) : null}
+                Mark all read
               </Button>
-              {notificationsOpen ? (
-                <div className="absolute right-0 top-11 z-30 w-[360px] rounded-lg border bg-card p-3 text-card-foreground shadow-lg">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">Notifications</p>
-                      <p className="text-xs text-muted-foreground">
-                        {unreadNotifications.length} unread admin updates
-                      </p>
-                    </div>
+              <Button
+                aria-label="Close notifications"
+                size="icon"
+                variant="ghost"
+                onClick={() => setNotificationsOpen(false)}
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {notifications.map((notification) => (
+                <div
+                  key={notification.id}
+                  className="rounded-md border bg-background p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-medium">
+                      {notification.title}
+                    </p>
+                    <Badge
+                      variant={
+                        notification.tone === "warning"
+                          ? "secondary"
+                          : notification.tone === "success"
+                            ? "default"
+                            : "outline"
+                      }
+                    >
+                      {notification.tone === "warning"
+                        ? "Review"
+                        : notification.tone === "success"
+                          ? "New"
+                          : "Info"}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {notification.description}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {notification.time}
+                  </p>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    {notification.href ? (
+                      <Button asChild size="sm" variant="outline">
+                        <Link
+                          href={notification.href}
+                          onClick={() => markNotificationRead(notification.id)}
+                        >
+                          Open
+                        </Link>
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={markAllNotificationsRead}
-                      disabled={!unreadNotifications.length}
+                      onClick={() => markNotificationRead(notification.id)}
+                      disabled={readNotifications.includes(notification.id)}
                     >
-                      Mark all read
-                    </Button>
-                    <Button
-                      aria-label="Close notifications"
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => setNotificationsOpen(false)}
-                    >
-                      <X className="size-4" />
+                      {readNotifications.includes(notification.id)
+                        ? "Read"
+                        : "Mark read"}
                     </Button>
                   </div>
-                  <div className="space-y-2">
-                    {notifications.map((notification) => (
-                      <div
-                        key={notification.id}
-                        className="rounded-md border bg-background p-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <p className="text-sm font-medium">
-                            {notification.title}
-                          </p>
-                          <Badge
-                            variant={
-                              notification.tone === "warning"
-                                ? "secondary"
-                                : notification.tone === "success"
-                                  ? "default"
-                                  : "outline"
-                            }
-                          >
-                            {notification.tone === "warning"
-                              ? "Review"
-                              : notification.tone === "success"
-                                ? "New"
-                                : "Info"}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {notification.description}
-                        </p>
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          {notification.time}
-                        </p>
-                        <div className="mt-3 flex items-center justify-between gap-2">
-                          {notification.href ? (
-                            <Button asChild size="sm" variant="outline">
-                              <Link
-                                href={notification.href}
-                                onClick={() => markNotificationRead(notification.id)}
-                              >
-                                Open
-                              </Link>
-                            </Button>
-                          ) : null}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => markNotificationRead(notification.id)}
-                            disabled={readNotifications.includes(notification.id)}
-                          >
-                            {readNotifications.includes(notification.id)
-                              ? "Read"
-                              : "Mark read"}
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                    {!notifications.length ? (
-                      <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
-                        No notifications yet.
-                      </div>
-                    ) : null}
-                  </div>
+                </div>
+              ))}
+              {!notifications.length ? (
+                <div className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  No notifications yet.
                 </div>
               ) : null}
             </div>
-            <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={handleSignOut}>
-              <LogOut className="size-4" />
-              Sign out
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/admin/settings">
-                <Settings className="size-4" />
-                Settings
-              </Link>
-            </Button>
-            <Button asChild size="sm">
-              <a href="#create">
-                <Plus className="size-4" />
-                New assessment
-              </a>
-            </Button>
           </div>
-          <Button
-            aria-label="Toggle navigation"
-            className="md:hidden"
-            size="icon"
-            variant="outline"
-            onClick={() => setNavOpen((value) => !value)}
-          >
-            <Menu className="size-4" />
-          </Button>
-        </div>
-        {navOpen ? (
-          <div className="border-t px-4 py-3 md:hidden">
-            <div className="mx-auto grid max-w-7xl gap-2">
-              {[
-                "overview",
-                "assessments",
-                "invites",
-                "notifications",
-                "settings",
-                "create",
-              ].map((item) => (
-                <Button key={item} asChild variant="ghost" className="justify-start">
-                  <Link
-                    href={item === "settings" ? "/admin/settings" : `#${item}`}
-                    onClick={() => setNavOpen(false)}
-                  >
-                    {item[0].toUpperCase() + item.slice(1)}
-                  </Link>
-                </Button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </header>
+        }
+      />
 
       <section className="mx-auto w-full max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
         <div id="overview" className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">

@@ -12,13 +12,14 @@ export function proxy(request: NextRequest) {
     "/admin/request-access-invitation",
     "/admin/reset-password",
     "/admin/setup-password",
+    "/admin/auth-required",
   ];
   const isPublicAdminPage = publicAdminPaths.includes(request.nextUrl.pathname);
   const isAuthenticated =
     isAdminSessionValue(request.cookies.get(ADMIN_SESSION_COOKIE)?.value);
 
   if (!isAuthenticated && !isPublicAdminPage) {
-    return NextResponse.redirect(new URL("/admin/login", request.url));
+    return NextResponse.redirect(new URL("/admin/auth-required", request.url));
   }
 
   return NextResponse.next();

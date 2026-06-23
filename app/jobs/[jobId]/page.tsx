@@ -1,10 +1,8 @@
 import { notFound } from "next/navigation";
 import { JobDetail } from "@/features/jobs/components/job-detail";
-import { candidateJobs, getCandidateJob } from "@/features/jobs/job-data";
+import { getJobBySlug } from "@/lib/jobs";
 
-export function generateStaticParams() {
-  return candidateJobs.map((job) => ({ jobId: job.id }));
-}
+export const dynamic = "force-dynamic";
 
 export default async function JobDetailPage({
   params,
@@ -12,7 +10,7 @@ export default async function JobDetailPage({
   params: Promise<{ jobId: string }>;
 }) {
   const { jobId } = await params;
-  const job = getCandidateJob(jobId);
+  const job = await getJobBySlug(jobId);
 
   if (!job) {
     notFound();

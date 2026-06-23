@@ -21,7 +21,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { candidateJobs } from "@/features/jobs/job-data";
+import type { PublicJob } from "@/lib/job-types";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -29,18 +29,23 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-const departments = ["All", ...Array.from(new Set(candidateJobs.map((job) => job.department)))];
-const levels = ["All", "Entry", "Mid", "Senior"];
-
-export function JobListing() {
+export function JobListing({ jobs }: { jobs: PublicJob[] }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [department, setDepartment] = useState("All");
-  const [level, setLevel] = useState("All");
+  const [experience, setExperience] = useState("All");
+  const departments = useMemo(
+    () => ["All", ...Array.from(new Set(jobs.map((job) => job.department)))],
+    [jobs],
+  );
+  const experiences = useMemo(
+    () => ["All", ...Array.from(new Set(jobs.map((job) => job.experience)))],
+    [jobs],
+  );
 
   const filteredJobs = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    return candidateJobs.filter((job) => {
+    return jobs.filter((job) => {
       const matchesQuery = !query
         ? true
         : [
@@ -48,17 +53,18 @@ export function JobListing() {
             job.department,
             job.location,
             job.summary,
-            job.type,
-            job.level,
+            job.status,
+            job.experience,
             ...job.tags,
           ].some((value) => value.toLowerCase().includes(query));
       const matchesDepartment =
         department === "All" || job.department === department;
-      const matchesLevel = level === "All" || job.level === level;
+      const matchesExperience =
+        experience === "All" || job.experience === experience;
 
-      return matchesQuery && matchesDepartment && matchesLevel;
+      return matchesQuery && matchesDepartment && matchesExperience;
     });
-  }, [department, level, searchQuery]);
+  }, [department, experience, jobs, searchQuery]);
 
   return (
     <main className="min-h-svh bg-background text-foreground">
@@ -102,7 +108,7 @@ export function JobListing() {
             <CardHeader>
               <CardTitle>Application flow</CardTitle>
               <CardDescription>
-                This temporary flow connects the candidate job pages to the quiz route.
+                Review open roles and continue to the current assessment route.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
@@ -121,7 +127,7 @@ export function JobListing() {
             <div>
               <CardTitle>Job listing</CardTitle>
               <CardDescription>
-                Search by title, department, location, level, or keyword.
+                Search by title, department, location, experience, or keyword.
               </CardDescription>
             </div>
             <Badge variant="outline" className="h-7 rounded-md px-3">
@@ -154,13 +160,13 @@ export function JobListing() {
               </select>
               <select
                 className="h-10 rounded-md border bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-input focus-visible:ring-0"
-                value={level}
-                onChange={(event) => setLevel(event.target.value)}
-                aria-label="Filter by level"
+                value={experience}
+                onChange={(event) => setExperience(event.target.value)}
+                aria-label="Filter by experience"
               >
-                {levels.map((item) => (
+                {experiences.map((item) => (
                   <option key={item} value={item}>
-                    {item === "All" ? "All levels" : item}
+                    {item === "All" ? "All experience" : item}
                   </option>
                 ))}
               </select>
@@ -170,15 +176,17 @@ export function JobListing() {
               {filteredJobs.map((job) => (
                 <Link
                   key={job.id}
-                  href={`/jobs/${job.id}`}
+                  href={`/jobs/${job.slug}`}
                   className="group rounded-lg border bg-card p-4 transition hover:border-foreground/30 hover:bg-muted/30"
                 >
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <h2 className="text-lg font-semibold">{job.title}</h2>
-                        <Badge variant="outline">{job.level}</Badge>
-                        <Badge variant="secondary">{job.type}</Badge>
+                        <Badge variant="outline">{job.experience}</Badge>
+                        <Badge variant="secondary" className="capitalize">
+                          {job.status}
+                        </Badge>
                       </div>
                       <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
                         {job.summary}
@@ -211,7 +219,7 @@ export function JobListing() {
                     </span>
                     <span className="flex items-center gap-2">
                       <SlidersHorizontal className="size-3.5" />
-                      {job.assessment}
+                      {job.experience}
                     </span>
                   </div>
                 </Link>

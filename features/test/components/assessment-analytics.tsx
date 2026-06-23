@@ -16,7 +16,7 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -261,8 +261,10 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
 
   return (
     <main className="min-h-svh bg-background text-foreground">
-      <header className="border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex min-h-16 w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
+      <AdminNavbar />
+
+      <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <Button asChild variant="outline" size="icon">
               <Link href="/admin" aria-label="Back to dashboard">
@@ -284,11 +286,8 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
               <ExternalLink className="size-4" />
             </Link>
           </Button>
-          <ThemeToggle />
         </div>
-      </header>
 
-      <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             {

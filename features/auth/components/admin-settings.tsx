@@ -9,20 +9,18 @@ import {
   PlayCircle,
   Trash2,
   Grid2X2,
-  LayoutDashboard,
   List,
-  LogOut,
   Mail,
   Search,
-  Settings,
   ShieldCheck,
   UserPlus,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 
-import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,7 +32,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SessionExpiryDialog } from "@/features/auth/components/session-expiry-dialog";
 import { ADMIN_INVITATION_EXPIRY_DAYS } from "@/lib/admin-constants";
 import { cn } from "@/lib/utils";
 
@@ -259,6 +256,7 @@ function AdminSettingsSkeleton() {
 }
 
 export function AdminSettings() {
+  const router = useRouter();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [canManageAdmins, setCanManageAdmins] = useState(false);
   const [canModerateAdmins, setCanModerateAdmins] = useState(false);
@@ -275,7 +273,6 @@ export function AdminSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionUserId, setActionUserId] = useState("");
-  const [sessionExpired, setSessionExpired] = useState(false);
 
   const filteredUsers = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -333,7 +330,8 @@ export function AdminSettings() {
 
         if (!response.ok) {
           if (response.status === 401) {
-            setSessionExpired(true);
+            router.replace("/admin/auth-required?reason=expired");
+            return;
           }
           setMessage(result.message ?? "Could not load admin settings.");
           return;
@@ -360,7 +358,7 @@ export function AdminSettings() {
       isMounted = false;
       controller.abort();
     };
-  }, []);
+  }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -378,7 +376,8 @@ export function AdminSettings() {
 
     if (!response.ok || !result.user) {
       if (response.status === 401) {
-        setSessionExpired(true);
+        router.replace("/admin/auth-required?reason=expired");
+        return;
       }
       const nextMessage = result.message ?? "Could not add admin.";
       setMessage(nextMessage);
@@ -408,11 +407,6 @@ export function AdminSettings() {
     setIsSubmitting(false);
   }
 
-  async function handleSignOut() {
-    await fetch("/api/admin/session", { method: "DELETE" });
-    window.location.assign("/admin/login");
-  }
-
   async function handlePauseToggle(user: AdminUser) {
     setActionUserId(user.id);
 
@@ -425,7 +419,8 @@ export function AdminSettings() {
 
     if (!response.ok || !result.user) {
       if (response.status === 401) {
-        setSessionExpired(true);
+        router.replace("/admin/auth-required?reason=expired");
+        return;
       }
       toast.error(result.message ?? "Could not update admin account.");
       setActionUserId("");
@@ -456,7 +451,8 @@ export function AdminSettings() {
 
     if (!response.ok) {
       if (response.status === 401) {
-        setSessionExpired(true);
+        router.replace("/admin/auth-required?reason=expired");
+        return;
       }
       toast.error(result.message ?? "Could not delete admin account.");
       setActionUserId("");
@@ -548,38 +544,7 @@ export function AdminSettings() {
 
   return (
     <main className="min-h-svh bg-background text-foreground">
-      <SessionExpiryDialog open={sessionExpired} />
-      <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-          <Link href="/admin" className="flex min-w-0 items-center gap-2 font-semibold">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-card">
-              <ShieldCheck className="size-4" />
-            </span>
-            <span className="truncate">KGM Hiring Workspace</span>
-          </Link>
-          <nav className="hidden items-center gap-1 md:flex">
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/admin">
-                <LayoutDashboard className="size-4" />
-                Dashboard
-              </Link>
-            </Button>
-            <Button asChild variant="secondary" size="sm">
-              <Link href="/admin/settings">
-                <Settings className="size-4" />
-                Settings
-              </Link>
-            </Button>
-          </nav>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={handleSignOut}>
-              <LogOut className="size-4" />
-              <span className="hidden sm:inline">Sign out</span>
-            </Button>
-          </div>
-        </div>
-      </header>
+      <AdminNavbar />
 
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
         {isLoading ? (

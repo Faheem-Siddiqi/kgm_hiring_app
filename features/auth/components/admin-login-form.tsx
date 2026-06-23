@@ -9,9 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SessionExpiryDialog } from "@/features/auth/components/session-expiry-dialog";
 
-export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: boolean }) {
+export function AdminLoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -41,8 +40,6 @@ export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: bo
   }
 
   return (
-    <>
-      <SessionExpiryDialog open={sessionExpired} />
       <Card className="w-full max-w-md shadow-xs">
         <CardHeader className="space-y-4">
           <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -97,6 +94,5 @@ export function AdminLoginForm({ sessionExpired = false }: { sessionExpired?: bo
           </form>
         </CardContent>
       </Card>
-    </>
   );
 }

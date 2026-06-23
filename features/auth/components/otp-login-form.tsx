@@ -1,10 +1,10 @@
 "use client";
-
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { BriefcaseBusiness, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -98,6 +98,7 @@ export function OtpLoginForm() {
           </div>
         </form>
       </CardContent>
+      
     </Card>
   );
 }

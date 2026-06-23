@@ -16,7 +16,7 @@ export async function requireAdminPageSession() {
 
   if (!session) {
     cookieStore.delete(ADMIN_SESSION_COOKIE);
-    redirect("/admin/login?expired=1");
+    redirect("/admin/auth-required?reason=expired");
   }
 
   return session;

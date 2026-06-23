@@ -1,7 +1,6 @@
 import Link from "next/link";
 import {
   ArrowLeft,
-  ArrowRight,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
@@ -18,7 +17,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { CandidateJob } from "@/features/jobs/job-data";
+import { JobAssessmentButton } from "@/features/jobs/components/job-assessment-button";
+import type { PublicJob } from "@/lib/job-types";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -26,7 +26,7 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-export function JobDetail({ job }: { job: CandidateJob }) {
+export function JobDetail({ job }: { job: PublicJob }) {
   return (
     <main className="min-h-svh bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
@@ -37,12 +37,13 @@ export function JobDetail({ job }: { job: CandidateJob }) {
             </span>
             <span className="truncate">KGM Careers</span>
           </Link>
-          <Button asChild size="sm">
-            <Link href="/test">
-              Attempt assessment
-              <ArrowRight className="size-4" />
-            </Link>
-          </Button>
+          <JobAssessmentButton
+            jobTitle={job.title}
+            resourceId={job.assessmentResourceId}
+            className="shrink-0"
+            label="Attempt assessment"
+            size="sm"
+          />
         </div>
       </header>
 
@@ -60,8 +61,8 @@ export function JobDetail({ job }: { job: CandidateJob }) {
               <CardHeader className="space-y-4">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="secondary">{job.department}</Badge>
-                  <Badge variant="outline">{job.level}</Badge>
-                  <Badge variant="outline">{job.type}</Badge>
+                  <Badge variant="outline">{job.experience}</Badge>
+                  <Badge variant="outline">{job.status}</Badge>
                 </div>
                 <div>
                   <CardTitle className="text-3xl sm:text-4xl">{job.title}</CardTitle>
@@ -74,8 +75,8 @@ export function JobDetail({ job }: { job: CandidateJob }) {
                 {[
                   { label: "Location", value: job.location, icon: MapPin },
                   { label: "Created", value: formatDate(job.createdAt), icon: CalendarDays },
-                  { label: "Closing date", value: formatDate(job.closingAt), icon: CalendarDays },
-                  { label: "Salary", value: job.salary, icon: WalletCards },
+                  { label: "Updated", value: formatDate(job.updatedAt), icon: CalendarDays },
+                  { label: "Experience", value: job.experience, icon: WalletCards },
                 ].map(({ label, value, icon: Icon }) => (
                   <div key={label} className="rounded-md border p-4">
                     <Icon className="mb-3 size-4 text-muted-foreground" />
@@ -133,18 +134,15 @@ export function JobDetail({ job }: { job: CandidateJob }) {
               <CardContent className="space-y-4">
                 <div className="rounded-md border bg-muted/25 p-4">
                   <ClipboardCheck className="mb-3 size-4 text-muted-foreground" />
-                  <p className="text-sm font-medium">{job.assessment}</p>
+                  <p className="text-sm font-medium">{job.title}</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    You will continue to the current assessment overview. Real job-to-test
-                    matching can be wired later.
+                    You will continue to the {job.assessmentResourceLabel} assessment.
                   </p>
                 </div>
-                <Button asChild className="w-full" size="lg">
-                  <Link href="/test">
-                    Apply and attempt assessment
-                    <ArrowRight className="size-4" />
-                  </Link>
-                </Button>
+                <JobAssessmentButton
+                  jobTitle={job.title}
+                  resourceId={job.assessmentResourceId}
+                />
                 <Button asChild className="w-full" variant="outline">
                   <Link href="/jobs">Review other jobs</Link>
                 </Button>
@@ -162,11 +160,15 @@ export function JobDetail({ job }: { job: CandidateJob }) {
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Work type</span>
-                  <span className="font-medium">{job.type}</span>
+                  <span className="font-medium">{job.location}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Level</span>
-                  <span className="font-medium">{job.level}</span>
+                  <span className="text-muted-foreground">Status</span>
+                  <span className="font-medium capitalize">{job.status}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">Assessment</span>
+                  <span className="font-medium">{job.assessmentResourceLabel}</span>
                 </div>
                 <div className="flex flex-wrap gap-2 border-t pt-4">
                   {job.tags.map((tag) => (
@@ -182,11 +184,12 @@ export function JobDetail({ job }: { job: CandidateJob }) {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Building2 className="size-5" />
-                  About this dummy page
+                  Kohinoor Textile Mills Limited
                 </CardTitle>
                 <CardDescription>
-                  Built as a temporary candidate-facing route so the job browsing
-                  journey can be tested before real job data is connected.
+                  +92 51 3564337
+                  <br />
+                  info@kmlg.com
                 </CardDescription>
               </CardHeader>
             </Card>
