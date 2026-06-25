@@ -6,7 +6,9 @@ import {
   createJob,
   JobError,
   listJobs,
+  parsePaginationParams,
   parseJobInput,
+  updateJob,
   updateJobStatus,
 } from "@/lib/jobs";
 import type { JobStatus } from "@/lib/job-types";
@@ -19,7 +21,7 @@ async function requireAdminSession() {
   return validateAdminSessionToken(getAdminSessionToken(cookieValue));
 }
 
-export const GET = withErrorHandler(async () => {
+export const GET = withErrorHandler(async (request: Request) => {
   const session = await requireAdminSession();
 
   if (!session) {
@@ -29,7 +31,12 @@ export const GET = withErrorHandler(async () => {
     );
   }
 
-  return NextResponse.json(await listJobs({ includeInactive: true }));
+  return NextResponse.json(
+    await listJobs({
+      includeInactive: true,
+      ...parsePaginationParams(new URL(request.url).searchParams),
+    }),
+  );
 });
 
 export const POST = withErrorHandler(async (request: Request) => {
@@ -80,6 +87,55 @@ export const PATCH = withErrorHandler(async (request: Request) => {
 
   try {
     const job = await updateJobStatus(body.jobId, body.status);
+
+    return NextResponse.json({ job });
+  } catch (error) {
+    const status = error instanceof JobError ? error.status : 400;
+
+    return NextResponse.json(
+      {
+        message:
+          error instanceof Error ? error.message : "Could not update job.",
+      },
+      { status },
+    );
+  }
+});
+
+export const PUT = withErrorHandler(async (request: Request) => {
+  const session = await requireAdminSession();
+
+  if (!session) {
+    return NextResponse.json(
+      { message: "Your session expired. Please sign in again." },
+      { status: 401 },
+    );
+  }
+
+  const body = (await request.json()) as {
+    jobId?: string;
+    title?: string;
+    department?: string;
+    location?: string;
+    experience?: string;
+    status?: string;
+    summary?: string;
+    description?: string;
+    responsibilities?: string[];
+    requirements?: string[];
+    tags?: string[];
+    assessmentIds?: unknown;
+  };
+
+  if (!body.jobId) {
+    return NextResponse.json(
+      { message: "Job is required." },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const job = await updateJob(body.jobId, parseJobInput(body));
 
     return NextResponse.json({ job });
   } catch (error) {

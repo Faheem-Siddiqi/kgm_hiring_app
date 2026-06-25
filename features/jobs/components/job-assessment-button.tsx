@@ -11,14 +11,18 @@ export function JobAssessmentButton({
   className = "w-full",
   label = "Apply and attempt assessment",
   size = "lg",
+  disabled = false,
 }: {
   jobTitle: string;
   resourceId: string;
   className?: string;
   label?: string;
   size?: ComponentProps<typeof Button>["size"];
+  disabled?: boolean;
 }) {
   function startAssessment() {
+    if (!resourceId) return;
+
     createJobAssessment({
       title: `${jobTitle} Assessment`,
       resourceId,
@@ -30,7 +34,7 @@ export function JobAssessmentButton({
   }
 
   return (
-    <Button className={className} size={size} onClick={startAssessment}>
+    <Button className={className} size={size} onClick={startAssessment} disabled={disabled}>
       {label}
       <ArrowRight className="size-4" />
     </Button>

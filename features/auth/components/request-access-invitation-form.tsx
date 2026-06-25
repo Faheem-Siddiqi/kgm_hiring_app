@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import { ArrowLeft, Send, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CheckCircle2, MailCheck, Send, ShieldCheck, UserPlus } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -58,75 +59,109 @@ export function RequestAccessInvitationForm() {
   }
 
   return (
-    <Card className="w-full max-w-md shadow-lg">
-      <CardHeader className="space-y-3">
-        <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <ShieldCheck className="size-5" />
-        </div>
-        <CardTitle className="text-2xl">Request admin access</CardTitle>
-        <CardDescription>
-          Use this when your first-time setup link expired or you need admin
-          access. Enter an approving main-admin email first. We only send the
-          request if that admin is allowed to add sub-admins.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          <div className="space-y-2">
-            <Label htmlFor="reviewer-admin-email">Approving admin email</Label>
-            <Input
-              className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
-              id="reviewer-admin-email"
-              type="email"
-              autoComplete="email"
-              value={adminEmail}
-              onChange={(event) => setAdminEmail(event.target.value)}
-              placeholder="main.admin@company.com"
-              required
-            />
-            <p className="text-xs leading-5 text-muted-foreground">
-              This must be an active main admin who can add sub-admins.
+    <section className="mx-auto flex min-h-svh w-full max-w-6xl items-center px-4 py-10 sm:px-6 lg:px-8">
+      <div className="grid w-full gap-6 lg:grid-cols-[1fr_460px] lg:items-center">
+        <div className="space-y-5">
+          <Badge variant="secondary" className="w-fit gap-2">
+            <UserPlus className="size-3.5" />
+            Admin invitation request
+          </Badge>
+          <div className="space-y-3">
+            <h1 className="max-w-3xl text-3xl font-semibold tracking-tight sm:text-5xl">
+              Request access from a main admin
+            </h1>
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+              Use this page when a setup link has expired or an approved team
+              member needs a fresh admin invitation. The request goes to a main
+              admin who can review it before access is created.
             </p>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="requester-email">Email needing admin access</Label>
-            <Input
-              className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
-              id="requester-email"
-              type="email"
-              autoComplete="email"
-              value={requesterEmail}
-              onChange={(event) => setRequesterEmail(event.target.value)}
-              placeholder="new.admin@company.com"
-              required
-            />
+          <div className="max-w-2xl space-y-3 border-l pl-4 text-sm leading-6 text-muted-foreground">
+            {[
+              "Enter the approving main admin first so the request reaches the right reviewer.",
+              "Use the requester email for the person who needs admin access.",
+              "Add a short note if the old setup link expired or the role needs context.",
+            ].map((item) => (
+              <p key={item} className="flex gap-2">
+                <CheckCircle2 className="mt-1 size-4 shrink-0 text-emerald-500" />
+                <span>{item}</span>
+              </p>
+            ))}
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="access-note">Note for the reviewing admin</Label>
-            <Textarea
-              className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
-              id="access-note"
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              maxLength={800}
-              placeholder="Example: My setup link expired. Please review and send a fresh invitation if access is approved."
-            />
-          </div>
-          {message ? (
-            <p className="text-sm text-muted-foreground">{message}</p>
-          ) : null}
-          <Button className="w-full" disabled={isSubmitting} type="submit">
-            <Send className="size-4" />
-            {isSubmitting ? "Sending request..." : "Send access request"}
-          </Button>
-          <Button asChild className="w-full" variant="ghost">
-            <Link href="/admin/login">
-              <ArrowLeft className="size-4" />
-              Back to login
-            </Link>
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+        </div>
+
+        <Card className="shadow-xs">
+          <CardHeader className="space-y-3">
+            <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <ShieldCheck className="size-5" />
+            </div>
+            <CardTitle className="text-2xl">Request admin access</CardTitle>
+            <CardDescription>
+              Enter the approving admin and the email that needs access.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-5" onSubmit={handleSubmit}>
+              <div className="space-y-2">
+                <Label htmlFor="reviewer-admin-email">Approving admin email</Label>
+                <Input
+                  className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
+                  id="reviewer-admin-email"
+                  type="email"
+                  autoComplete="email"
+                  value={adminEmail}
+                  onChange={(event) => setAdminEmail(event.target.value)}
+                  placeholder="main.admin@company.com"
+                  required
+                />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  This must be an active main admin who can add sub-admins.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="requester-email">Email needing admin access</Label>
+                <Input
+                  className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
+                  id="requester-email"
+                  type="email"
+                  autoComplete="email"
+                  value={requesterEmail}
+                  onChange={(event) => setRequesterEmail(event.target.value)}
+                  placeholder="new.admin@company.com"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="access-note">Note for the reviewing admin</Label>
+                <Textarea
+                  className="min-h-24 focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
+                  id="access-note"
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  maxLength={800}
+                  placeholder="Example: My setup link expired. Please review and send a fresh invitation if access is approved."
+                />
+              </div>
+              {message ? (
+                <p className="rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                  <MailCheck className="mr-2 inline size-4" />
+                  {message}
+                </p>
+              ) : null}
+              <Button className="w-full" disabled={isSubmitting} type="submit">
+                <Send className="size-4" />
+                {isSubmitting ? "Sending request..." : "Send access request"}
+              </Button>
+              <Button asChild className="w-full" variant="outline">
+                <Link href="/admin/login">
+                  <ArrowLeft className="size-4" />
+                  Back to login
+                </Link>
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
   );
 }

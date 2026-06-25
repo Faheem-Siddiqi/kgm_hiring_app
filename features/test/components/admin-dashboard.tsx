@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import {
   ArrowRight,
   Bell,
@@ -9,11 +9,8 @@ import {
   BriefcaseBusiness,
   CheckCircle2,
   Clock,
-  Copy,
   FileText,
   Mail,
-  Plus,
-  Send,
   Users,
   X,
 } from "lucide-react";
@@ -32,8 +29,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
-  createCandidate,
-  createJobAssessment,
   readAdminDataSnapshot,
   subscribeToAdminData,
   updateJobAssessmentConfig,
@@ -41,7 +36,11 @@ import {
   type Candidate,
   type JobAssessment,
 } from "@/features/test/admin-storage";
-import { assessmentResourceSummaries } from "@/features/test/assessment-resources";
+import type {
+  AssessmentListSummary,
+  PublicAssessment,
+} from "@/lib/assessment-types";
+import type { PublicJob } from "@/lib/job-types";
 
 type AdminSnapshot = {
   candidates?: Candidate[];
@@ -56,6 +55,12 @@ type AdminNotification = {
   time: string;
   tone: "default" | "warning" | "success";
   href?: string;
+};
+
+type AdminDashboardProps = {
+  initialServerAssessments?: PublicAssessment[];
+  initialServerAssessmentSummary?: AssessmentListSummary;
+  initialPublicJobs?: PublicJob[];
 };
 
 const READ_NOTIFICATIONS_KEY = "kgm-hiring-admin-read-notifications";
@@ -126,7 +131,7 @@ function buildAdminNotifications(
       description: `${result.assessmentTitle} scored ${result.score}%`,
       time: formatDate(result.submittedAt),
       tone: result.status === "Auto submitted" ? "warning" : "success",
-      href: `/admin/${result.assessmentId}?submission=${result.id}`,
+      href: `/admin/assessment/${result.assessmentId}?submission=${result.id}`,
     }),
   );
   const pendingInvites = candidates.filter(
@@ -141,7 +146,7 @@ function buildAdminNotifications(
       description: `${candidate.name} has OTP ${candidate.otpCode}`,
       time: formatDate(candidate.invitedAt),
       tone: "default",
-      href: `/admin/${candidate.jobId}`,
+      href: `/admin/assessment/${candidate.jobId}`,
     }));
   const assessmentNotifications: AdminNotification[] = jobs.slice(0, 2).map(
     (job) => ({
@@ -150,7 +155,7 @@ function buildAdminNotifications(
       description: `${job.role} is ready for candidate invites`,
       time: formatDate(job.createdAt),
       tone: "default",
-      href: `/admin/${job.id}`,
+      href: `/admin/assessment/${job.id}`,
     }),
   );
 
@@ -179,28 +184,59 @@ function writeNotificationIds(ids: string[]) {
   window.localStorage.setItem(READ_NOTIFICATIONS_KEY, JSON.stringify(ids));
 }
 
-export function AdminDashboard() {
+function toDashboardAssessment(assessment: PublicAssessment): JobAssessment {
+  return {
+    id: assessment.id,
+    title: assessment.name,
+    role: assessment.questionBankName,
+    createdAt: assessment.createdAt,
+    resourceId: assessment.questionBankId,
+    sectionCount: assessment.sectionCount,
+    timePerSectionMinutes: Math.max(
+      1,
+      Math.round(
+        assessment.sectionSettings.reduce(
+          (total, section) =>
+            total +
+            Math.max(
+              section.types.mcq.timeLimitSeconds,
+              section.types.multi.timeLimitSeconds,
+              section.types.text.timeLimitSeconds,
+            ),
+          0,
+        ) / 60,
+      ),
+    ),
+    questionsPerTest: assessment.totalQuestions,
+    questionsPerSection: Math.max(
+      1,
+      Math.round(assessment.totalQuestions / Math.max(assessment.sectionCount, 1)),
+    ),
+    dummyQuestionsPerSection: 0,
+  };
+}
+
+export function AdminDashboard({
+  initialServerAssessments = [],
+  initialServerAssessmentSummary,
+  initialPublicJobs = [],
+}: AdminDashboardProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [readNotifications, setReadNotifications] = useState<string[]>(() =>
     readNotificationIds(),
   );
-  const [assessmentTitle, setAssessmentTitle] = useState("");
-  const [resourceId, setResourceId] = useState(
-    assessmentResourceSummaries[0]?.id ?? "",
-  );
-  const [sectionCount, setSectionCount] = useState(3);
-  const [questionsPerSection, setQuestionsPerSection] = useState(20);
-  const [timePerSectionMinutes, setTimePerSectionMinutes] = useState(15);
-  const [candidateName, setCandidateName] = useState("");
-  const [candidateEmail, setCandidateEmail] = useState("");
-  const [candidateJobId, setCandidateJobId] = useState("");
-  const [lastInvite, setLastInvite] = useState<Candidate | null>(null);
   const { candidates, jobs, results } = useAdminData();
-  const activeCandidateJobId = candidateJobId || jobs[0]?.id || "";
+  const dashboardJobs = useMemo(
+    () =>
+      jobs.length
+        ? jobs
+        : initialServerAssessments.map(toDashboardAssessment),
+    [initialServerAssessments, jobs],
+  );
   const latestResults = useMemo(() => results.slice(0, 4), [results]);
   const notifications = useMemo(
-    () => buildAdminNotifications(jobs, candidates, results).slice(0, 6),
-    [jobs, candidates, results],
+    () => buildAdminNotifications(dashboardJobs, candidates, results).slice(0, 6),
+    [dashboardJobs, candidates, results],
   );
   const unreadNotifications = notifications.filter(
     (notification) => !readNotifications.includes(notification.id),
@@ -209,71 +245,9 @@ export function AdminDashboard() {
   const completedCount = results.filter(
     (result) => result.status === "Submitted",
   ).length;
-  const selectedResource = assessmentResourceSummaries.find(
-    (resource) => resource.id === resourceId,
-  );
-
-  function handleCreateAssessment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!assessmentTitle.trim() || !selectedResource) {
-      toast.error("Assessment name and question bank are required");
-      return;
-    }
-
-    if (sectionCount > selectedResource.sectionCount) {
-      toast.error(
-        `${selectedResource.role} has only ${selectedResource.sectionCount} sections`,
-      );
-      return;
-    }
-
-    if (questionsPerSection > selectedResource.maxQuestionsPerSection) {
-      toast.error(
-        `Each ${selectedResource.role} section has up to ${selectedResource.maxQuestionsPerSection} questions`,
-      );
-      return;
-    }
-
-    const job = createJobAssessment({
-      title: assessmentTitle.trim(),
-      resourceId: selectedResource.id,
-      sectionCount,
-      timePerSectionMinutes,
-      questionsPerSection,
-    });
-    setCandidateJobId(job.id);
-    setAssessmentTitle("");
-    toast.success("Assessment created");
-  }
-
-  function handleSendInvite(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!candidateName.trim() || !candidateEmail.trim() || !activeCandidateJobId) {
-      toast.error("Candidate name, email, and assessment are required");
-      return;
-    }
-
-    const candidate = createCandidate(
-      candidateName.trim(),
-      candidateEmail.trim(),
-      activeCandidateJobId,
-    );
-    setLastInvite(candidate);
-    toast.success(`Invite email prepared for ${candidate.email}`);
-    setCandidateName("");
-    setCandidateEmail("");
-  }
-
-  async function copyInviteCode(code: string) {
-    try {
-      await navigator.clipboard.writeText(code);
-      toast.success("OTP copied");
-    } catch {
-      toast.error("Could not copy OTP");
-    }
-  }
+  const assessmentCount =
+    jobs.length || initialServerAssessmentSummary?.total || dashboardJobs.length;
+  const publicJobCount = initialPublicJobs.length;
 
   function markNotificationRead(id: string) {
     setReadNotifications((current) => {
@@ -296,8 +270,7 @@ export function AdminDashboard() {
       | "sectionCount"
       | "timePerSectionMinutes"
       | "questionsPerTest"
-      | "questionsPerSection"
-      | "dummyQuestionsPerSection",
+      | "questionsPerSection",
     value: string,
   ) {
     updateJobAssessmentConfig(job.id, {
@@ -420,8 +393,8 @@ export function AdminDashboard() {
                 Recruitment assessment workspace
               </h1>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                Create role-specific assessments, send candidate email invites
-                with OTP codes, and open each assessment for focused analytics.
+                Track assessment activity, review submissions, and open focused
+                analytics for each configured assessment.
               </p>
             </div>
           </div>
@@ -434,12 +407,12 @@ export function AdminDashboard() {
               {[
                 {
                   label: "Assessments",
-                  value: jobs.length,
+                  value: assessmentCount,
                   icon: BriefcaseBusiness,
                 },
                 {
-                  label: "Candidates",
-                  value: candidates.length,
+                  label: "Open jobs",
+                  value: publicJobCount,
                   icon: Users,
                 },
                 {
@@ -464,183 +437,7 @@ export function AdminDashboard() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-          <div id="create" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Create assessment</CardTitle>
-                <CardDescription>
-                  Add a new assessment for a specific role.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form className="space-y-4" onSubmit={handleCreateAssessment}>
-                  <div className="space-y-2">
-                    <Label htmlFor="assessment-title">Assessment name</Label>
-                    <Input
-                      id="assessment-title"
-                      value={assessmentTitle}
-                      onChange={(event) => setAssessmentTitle(event.target.value)}
-                      placeholder="Finance Officer Screening"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="resource-id">Question bank</Label>
-                    <select
-                      id="resource-id"
-                      className="flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      value={resourceId}
-                      onChange={(event) => {
-                        const nextResource = assessmentResourceSummaries.find(
-                          (resource) => resource.id === event.target.value,
-                        );
-                        setResourceId(event.target.value);
-                        if (nextResource) {
-                          setSectionCount((value) =>
-                            Math.min(value, nextResource.sectionCount),
-                          );
-                          setQuestionsPerSection((value) =>
-                            Math.min(value, nextResource.maxQuestionsPerSection),
-                          );
-                        }
-                      }}
-                    >
-                      {assessmentResourceSummaries.map((resource) => (
-                        <option key={resource.id} value={resource.id}>
-                          {resource.role}
-                        </option>
-                      ))}
-                    </select>
-                    {selectedResource ? (
-                      <p className="text-xs text-muted-foreground">
-                        Limit: {selectedResource.sectionCount} sections,{" "}
-                        {selectedResource.maxQuestionsPerSection} questions per
-                        section.
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="section-count">Sections</Label>
-                      <Input
-                        id="section-count"
-                        type="number"
-                        min={1}
-                        max={selectedResource?.sectionCount ?? 1}
-                        value={sectionCount}
-                        onChange={(event) =>
-                          setSectionCount(Number(event.target.value))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="question-count">Questions / section</Label>
-                      <Input
-                        id="question-count"
-                        type="number"
-                        min={1}
-                        max={selectedResource?.maxQuestionsPerSection ?? 1}
-                        value={questionsPerSection}
-                        onChange={(event) =>
-                          setQuestionsPerSection(Number(event.target.value))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="section-time">Minutes / section</Label>
-                      <Input
-                        id="section-time"
-                        type="number"
-                        min={1}
-                        value={timePerSectionMinutes}
-                        onChange={(event) =>
-                          setTimePerSectionMinutes(Number(event.target.value))
-                        }
-                      />
-                    </div>
-                  </div>
-                  <Button className="w-full" type="submit">
-                    <Plus className="size-4" />
-                    Create assessment
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-
-            <Card id="invites">
-              <CardHeader>
-                <CardTitle>Email invite</CardTitle>
-                <CardDescription>
-                  Assign an assessment and generate a secure candidate access code.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form className="space-y-4" onSubmit={handleSendInvite}>
-                  <div className="space-y-2">
-                    <Label htmlFor="candidate-name">Candidate name</Label>
-                    <Input
-                      id="candidate-name"
-                      value={candidateName}
-                      onChange={(event) => setCandidateName(event.target.value)}
-                      placeholder="Candidate name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="candidate-email">Email</Label>
-                    <Input
-                      id="candidate-email"
-                      type="email"
-                      value={candidateEmail}
-                      onChange={(event) => setCandidateEmail(event.target.value)}
-                      placeholder="candidate@example.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Assessment</Label>
-                    <div className="grid gap-2">
-                      {jobs.map((job) => (
-                        <Button
-                          key={job.id}
-                          type="button"
-                          variant={
-                            activeCandidateJobId === job.id ? "default" : "outline"
-                          }
-                          className="justify-start"
-                          onClick={() => setCandidateJobId(job.id)}
-                        >
-                          {job.role}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  <Button className="w-full" type="submit">
-                    <Send className="size-4" />
-                    Send email
-                  </Button>
-                </form>
-
-                {lastInvite ? (
-                  <div className="mt-4 rounded-md border bg-muted/30 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">{lastInvite.email}</p>
-                        <p className="text-xs text-muted-foreground">
-                          OTP code: {lastInvite.otpCode}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => copyInviteCode(lastInvite.otpCode)}
-                      >
-                        <Copy className="size-4" />
-                        Copy code
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
+          <div className="space-y-6">
             <Card id="notifications">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
@@ -719,13 +516,13 @@ export function AdminDashboard() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {jobs.map((job) => {
+                {dashboardJobs.map((job) => {
                   const stats = getAssessmentStats(job, candidates, results);
 
                   return (
                     <Link
                       key={job.id}
-                      href={`/admin/${job.id}`}
+                      href={`/admin/assessment/${job.id}`}
                       className="group block rounded-lg border p-4 transition hover:border-foreground/30 hover:bg-muted/35"
                     >
                       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -764,7 +561,7 @@ export function AdminDashboard() {
                         <span>{job.sectionCount} sections</span>
                         <span>{job.timePerSectionMinutes} min each</span>
                         <span>{job.questionsPerSection} questions each</span>
-                        <span>{job.dummyQuestionsPerSection} dummy each</span>
+                        <span>{job.questionsPerTest} total questions</span>
                       </div>
                       <Progress className="mt-4" value={stats.completionRate} />
                     </Link>
@@ -777,12 +574,11 @@ export function AdminDashboard() {
               <CardHeader>
                 <CardTitle>Assessment setup</CardTitle>
                 <CardDescription>
-                  Edit section count, timing, dictionary question pick size, and
-                  dummy questions per section.
+                  Edit section count, timing, and question pick size.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {jobs.map((job) => (
+                {dashboardJobs.map((job) => (
                   <div key={job.id} className="rounded-md border p-4">
                     <div className="mb-4 flex items-start justify-between gap-3">
                       <div>
@@ -799,21 +595,19 @@ export function AdminDashboard() {
                         ["sectionCount", "Sections"],
                         ["timePerSectionMinutes", "Minutes / section"],
                         ["questionsPerSection", "Questions / section"],
-                        ["dummyQuestionsPerSection", "Dummy questions / section"],
                       ].map(([field, label]) => (
                         <div key={field} className="space-y-2">
                           <Label htmlFor={`${job.id}-${field}`}>{label}</Label>
                           <Input
                             id={`${job.id}-${field}`}
                             type="number"
-                            min={field === "dummyQuestionsPerSection" ? 0 : 1}
+                            min={1}
                             value={String(
                               job[field as keyof Pick<
                                 JobAssessment,
                                 | "sectionCount"
                                 | "timePerSectionMinutes"
                                 | "questionsPerSection"
-                                | "dummyQuestionsPerSection"
                               >],
                             )}
                             onChange={(event) =>
@@ -822,8 +616,7 @@ export function AdminDashboard() {
                                 field as
                                   | "sectionCount"
                                   | "timePerSectionMinutes"
-                                  | "questionsPerSection"
-                                  | "dummyQuestionsPerSection",
+                                  | "questionsPerSection",
                                 event.target.value,
                               )
                             }

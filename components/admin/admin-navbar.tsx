@@ -29,9 +29,8 @@ type AdminNavbarProps = {
 
 const navItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
-  { label: "Assessments", href: "/admin#assessments", icon: ClipboardList },
+  { label: "Assessments", href: "/admin/assessments", icon: ClipboardList },
   { label: "Jobs", href: "/admin/jobs", icon: BriefcaseBusiness },
-  { label: "Invites", href: "/admin#invites", icon: UserCircle },
   { label: "Settings", href: "/admin/settings", icon: Settings },
 ];
 

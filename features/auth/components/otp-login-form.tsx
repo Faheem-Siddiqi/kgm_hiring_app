@@ -1,10 +1,11 @@
 "use client";
 import { FormEvent, useState } from "react";
-import { BriefcaseBusiness, ShieldCheck } from "lucide-react";
+import { BriefcaseBusiness, ClipboardCheck, KeyRound, ShieldCheck, UserCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -47,58 +48,84 @@ export function OtpLoginForm() {
   }
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <div className="mb-3 flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <ShieldCheck className="size-5" />
-        </div>
-        <CardTitle className="text-2xl">Candidate Portal</CardTitle>
-        <CardDescription>
-          Enter the six-digit access code from your assessment invitation.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          <div className="space-y-2">
-            <Label htmlFor="otp">Assessment access code</Label>
-            <Input
-              id="otp"
-              inputMode="numeric"
-              maxLength={6}
-              pattern="[0-9]{6}"
-              placeholder="123456"
-              value={otp}
-              onChange={(event) =>
-                setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))
-              }
-            />
-          </div>
-          <Button className="w-full" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "Opening assessment..." : "Continue to assessment"}
-          </Button>
-          <div className="border-t pt-4 text-center">
-            <p className="mb-2 text-xs text-muted-foreground">
-              Applying for a role?
+    <section className="mx-auto flex min-h-svh w-full max-w-6xl items-center px-4 py-10 sm:px-6 lg:px-8">
+      <div className="grid w-full gap-6 lg:grid-cols-[1fr_420px] lg:items-center">
+        <div className="space-y-5">
+          <Badge variant="secondary" className="w-fit gap-2">
+            <UserCheck className="size-3.5" />
+            Candidate assessment portal
+          </Badge>
+          <div className="space-y-3">
+            <h1 className="max-w-3xl text-3xl font-semibold tracking-tight sm:text-5xl">
+              Continue your KGM assessment
+            </h1>
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+              Use the six-digit invitation code shared by the hiring team to
+              open your assigned role assessment.
             </p>
-            <Button asChild className="w-full" variant="secondary">
-              <Link href="/jobs">
-                <BriefcaseBusiness className="size-4" />
-                Browse open jobs
-              </Link>
-            </Button>
           </div>
-          <div className="border-t pt-4 text-center">
-            <p className="mb-2 text-xs text-muted-foreground">KGM hiring team member?</p>
-            <Button asChild className="w-full" variant="outline">
-              <Link href="/admin/login">
-                <BriefcaseBusiness className="size-4" />
-                Open hiring workspace
-              </Link>
-            </Button>
+          <div className="grid max-w-2xl gap-3 sm:grid-cols-3">
+            {[
+              { label: "Access code", icon: KeyRound },
+              { label: "Role test", icon: ClipboardCheck },
+              { label: "Secure flow", icon: ShieldCheck },
+            ].map(({ label, icon: Icon }) => (
+              <div key={label} className="rounded-md border bg-muted/20 p-3">
+                <Icon className="mb-3 size-4 text-muted-foreground" />
+                <p className="text-sm font-medium">{label}</p>
+              </div>
+            ))}
           </div>
-        </form>
-      </CardContent>
-      
-    </Card>
+        </div>
+
+        <Card className="shadow-xs">
+          <CardHeader>
+            <div className="mb-3 flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <ShieldCheck className="size-5" />
+            </div>
+            <CardTitle className="text-2xl">Candidate Portal</CardTitle>
+            <CardDescription>
+              Enter the access code from your assessment invitation.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-5" onSubmit={handleSubmit}>
+              <div className="space-y-2">
+                <Label htmlFor="otp">Assessment access code</Label>
+                <Input
+                  className="focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
+                  id="otp"
+                  inputMode="numeric"
+                  maxLength={6}
+                  pattern="[0-9]{6}"
+                  placeholder="123456"
+                  value={otp}
+                  onChange={(event) =>
+                    setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                />
+              </div>
+              <Button className="w-full" type="submit" disabled={isSubmitting}>
+                {isSubmitting ? "Opening assessment..." : "Continue to assessment"}
+              </Button>
+              <div className="grid gap-2 border-t pt-4">
+                <Button asChild className="w-full" variant="secondary">
+                  <Link href="/jobs">
+                    <BriefcaseBusiness className="size-4" />
+                    Browse open jobs
+                  </Link>
+                </Button>
+                <Button asChild className="w-full" variant="outline">
+                  <Link href="/admin/login">
+                    <BriefcaseBusiness className="size-4" />
+                    Open hiring workspace
+                  </Link>
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
   );
 }

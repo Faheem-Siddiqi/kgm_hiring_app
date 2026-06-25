@@ -1,10 +1,22 @@
 import { JobListing } from "@/features/jobs/components/job-listing";
-import { listJobs } from "@/lib/jobs";
+import { listJobs, parsePaginationParams } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 
-export default async function JobsPage() {
-  const { jobs } = await listJobs();
+export default async function JobsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const query = new URLSearchParams();
+  const page = Array.isArray(params.page) ? params.page[0] : params.page;
+  const pageSize = Array.isArray(params.pageSize) ? params.pageSize[0] : params.pageSize;
 
-  return <JobListing jobs={jobs} />;
+  if (page) query.set("page", page);
+  if (pageSize) query.set("pageSize", pageSize);
+
+  const { jobs, pagination } = await listJobs(parsePaginationParams(query));
+
+  return <JobListing jobs={jobs} pagination={pagination} />;
 }

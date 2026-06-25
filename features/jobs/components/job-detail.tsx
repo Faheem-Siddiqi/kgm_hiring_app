@@ -27,6 +27,8 @@ function formatDate(value: string) {
 }
 
 export function JobDetail({ job }: { job: PublicJob }) {
+  const primaryAssessment = job.assessments[0];
+
   return (
     <main className="min-h-svh bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
@@ -39,10 +41,11 @@ export function JobDetail({ job }: { job: PublicJob }) {
           </Link>
           <JobAssessmentButton
             jobTitle={job.title}
-            resourceId={job.assessmentResourceId}
+            resourceId={primaryAssessment?.questionBankId ?? ""}
             className="shrink-0"
             label="Attempt assessment"
             size="sm"
+            disabled={!primaryAssessment}
           />
         </div>
       </header>
@@ -107,7 +110,7 @@ export function JobDetail({ job }: { job: PublicJob }) {
             <Card>
               <CardHeader>
                 <CardTitle>Requirements</CardTitle>
-                <CardDescription>Baseline profile for this dummy opening.</CardDescription>
+                <CardDescription>Baseline profile for this opening.</CardDescription>
               </CardHeader>
               <CardContent>
                 <ul className="space-y-3 text-sm leading-6 text-muted-foreground">
@@ -127,8 +130,7 @@ export function JobDetail({ job }: { job: PublicJob }) {
               <CardHeader>
                 <CardTitle>Assessment step</CardTitle>
                 <CardDescription>
-                  This CTA connects the dummy job flow to the existing `/test`
-                  assessment route.
+                  This CTA connects the job flow to the assigned assessment route.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -136,12 +138,15 @@ export function JobDetail({ job }: { job: PublicJob }) {
                   <ClipboardCheck className="mb-3 size-4 text-muted-foreground" />
                   <p className="text-sm font-medium">{job.title}</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    You will continue to the {job.assessmentResourceLabel} assessment.
+                    {primaryAssessment
+                      ? `You will continue to ${primaryAssessment.code} · ${primaryAssessment.name}.`
+                      : "No assessment is assigned to this job yet."}
                   </p>
                 </div>
                 <JobAssessmentButton
                   jobTitle={job.title}
-                  resourceId={job.assessmentResourceId}
+                  resourceId={primaryAssessment?.questionBankId ?? ""}
+                  disabled={!primaryAssessment}
                 />
                 <Button asChild className="w-full" variant="outline">
                   <Link href="/jobs">Review other jobs</Link>
@@ -168,8 +173,26 @@ export function JobDetail({ job }: { job: PublicJob }) {
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Assessment</span>
-                  <span className="font-medium">{job.assessmentResourceLabel}</span>
+                  <span className="font-medium">
+                    {job.assessments.length
+                      ? `${job.assessments.length} assigned`
+                      : "Unassigned"}
+                  </span>
                 </div>
+                {job.assessments.length ? (
+                  <div className="space-y-2 border-t pt-4">
+                    {job.assessments.map((assessment) => (
+                      <div key={assessment.id} className="rounded-md border p-3">
+                        <p className="truncate text-sm font-medium">
+                          {assessment.code} · {assessment.name}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {assessment.questionBankName}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap gap-2 border-t pt-4">
                   {job.tags.map((tag) => (
                     <Badge key={tag} variant="outline">

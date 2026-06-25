@@ -1,14 +1,20 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   BriefcaseBusiness,
+  CheckCircle2,
+  CirclePause,
+  Lock,
   ListPlus,
   Loader2,
   Plus,
   RefreshCw,
   Search,
+  RotateCcw,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AdminNavbar } from "@/components/admin/admin-navbar";
@@ -27,8 +33,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   JOB_EXPERIENCE_LEVELS,
   JOB_LOCATIONS,
-  type JobAssessmentResourceOption,
+  type JobAssessmentOption,
   type JobListSummary,
+  type Pagination,
   type JobStatus,
   type PublicJob,
 } from "@/lib/job-types";
@@ -36,6 +43,7 @@ import {
 type JobsResponse = {
   jobs: PublicJob[];
   summary: JobListSummary;
+  pagination: Pagination;
 };
 
 type JobForm = {
@@ -43,7 +51,7 @@ type JobForm = {
   department: string;
   location: string;
   experience: string;
-  assessmentResourceId: string;
+  assessmentIds: string[];
   description: string;
   tags: string[];
   responsibilities: string[];
@@ -55,7 +63,7 @@ const emptyForm: JobForm = {
   department: "",
   location: JOB_LOCATIONS[0],
   experience: JOB_EXPERIENCE_LEVELS[0],
-  assessmentResourceId: "",
+  assessmentIds: [],
   description: "",
   tags: [],
   responsibilities: [],
@@ -89,6 +97,14 @@ function getStatusActions(status: JobStatus): Array<{ status: JobStatus; label: 
 
   return [{ status: "reopened", label: "Reopen" }];
 }
+
+const SUMMARY_ICONS: Record<string, LucideIcon> = {
+  Total: BriefcaseBusiness,
+  Open: CheckCircle2,
+  Paused: CirclePause,
+  Closed: Lock,
+  Reopened: RotateCcw,
+};
 
 function ChipInput({
   label,
@@ -195,24 +211,44 @@ function ChipInput({
 export function AdminJobs({
   initialJobs,
   initialSummary,
-  assessmentResources,
+  initialPagination,
+  assessments,
 }: {
   initialJobs: PublicJob[];
   initialSummary: JobListSummary;
-  assessmentResources: JobAssessmentResourceOption[];
+  initialPagination: Pagination;
+  assessments: JobAssessmentOption[];
 }) {
+  const assessmentPickerRef = useRef<HTMLDivElement | null>(null);
   const [jobs, setJobs] = useState<PublicJob[]>(initialJobs);
   const [summary, setSummary] = useState<JobListSummary>(initialSummary);
-  const [form, setForm] = useState<JobForm>(() => ({
-    ...emptyForm,
-    assessmentResourceId: assessmentResources[0]?.id ?? "",
-  }));
+  const [pagination, setPagination] = useState<Pagination>(initialPagination);
+  const [form, setForm] = useState<JobForm>(() => ({ ...emptyForm }));
   const [searchQuery, setSearchQuery] = useState("");
+  const [assessmentSearch, setAssessmentSearch] = useState("");
+  const [assessmentPickerOpen, setAssessmentPickerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  async function loadJobs() {
-    const response = await fetch("/api/admin/jobs");
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        assessmentPickerOpen &&
+        assessmentPickerRef.current &&
+        !assessmentPickerRef.current.contains(event.target as Node)
+      ) {
+        setAssessmentPickerOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [assessmentPickerOpen]);
+
+  async function loadJobs(page = pagination.page) {
+    const response = await fetch(
+      `/api/admin/jobs?page=${page}&pageSize=${pagination.pageSize}`,
+    );
     const payload = (await response.json()) as JobsResponse & { message?: string };
 
     if (!response.ok) {
@@ -223,8 +259,26 @@ export function AdminJobs({
 
     setJobs(payload.jobs);
     setSummary(payload.summary);
+    setPagination(payload.pagination);
     setLoading(false);
   }
+
+  const filteredAssessments = useMemo(() => {
+    const query = assessmentSearch.trim().toLowerCase();
+
+    if (!query) return assessments;
+
+    return assessments.filter((assessment) =>
+      [assessment.code, assessment.name, assessment.questionBankName, ...assessment.tags]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [assessmentSearch, assessments]);
+
+  const selectedAssessments = useMemo(
+    () => assessments.filter((assessment) => form.assessmentIds.includes(assessment.id)),
+    [assessments, form.assessmentIds],
+  );
 
   const filteredJobs = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -238,7 +292,7 @@ export function AdminJobs({
         job.experience,
         job.status,
         job.summary,
-        job.assessmentResourceLabel,
+        ...job.assessments.flatMap((assessment) => assessment.tags),
         ...job.tags,
       ].some((value) => value.toLowerCase().includes(query)),
     );
@@ -250,6 +304,11 @@ export function AdminJobs({
 
   async function handleCreateJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!form.assessmentIds.length) {
+      toast.error("Select at least one assessment before creating the job.");
+      return;
+    }
+
     setSaving(true);
     const payload = {
       ...form,
@@ -270,10 +329,7 @@ export function AdminJobs({
     }
 
     toast.success("Job created");
-    setForm({
-      ...emptyForm,
-      assessmentResourceId: assessmentResources[0]?.id ?? "",
-    });
+    setForm({ ...emptyForm });
     await loadJobs();
   }
 
@@ -297,6 +353,15 @@ export function AdminJobs({
     await loadJobs();
   }
 
+  function toggleAssessment(assessmentId: string) {
+    updateForm(
+      "assessmentIds",
+      form.assessmentIds.includes(assessmentId)
+        ? form.assessmentIds.filter((id) => id !== assessmentId)
+        : [...form.assessmentIds, assessmentId],
+    );
+  }
+
   return (
     <main className="min-h-svh bg-background text-foreground">
       <AdminNavbar />
@@ -314,14 +379,14 @@ export function AdminJobs({
             </p>
           </div>
           <Button asChild>
-            <a href="#create-job">
+            <Link href="/admin/assessments">
               <ListPlus className="size-4" />
-              Create job
-            </a>
+              Create Assessment
+            </Link>
           </Button>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid w-full gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {[
             ["Total", summary.total],
             ["Open", summary.open],
@@ -331,6 +396,10 @@ export function AdminJobs({
           ].map(([label, value]) => (
             <Card key={label}>
               <CardContent className="p-4">
+                {(() => {
+                  const Icon = SUMMARY_ICONS[label];
+                  return Icon ? <Icon className="mb-3 size-5 text-muted-foreground" /> : null;
+                })()}
                 <p className="text-xs text-muted-foreground">{label}</p>
                 <p className="mt-1 text-2xl font-semibold">{value}</p>
               </CardContent>
@@ -372,7 +441,7 @@ export function AdminJobs({
                 {filteredJobs.map((job) => (
                   <div key={job.id} className="rounded-md border bg-card p-4">
                     <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 space-y-2">
+                      <Link href={`/admin/jobs/${job.slug}`} className="min-w-0 flex-1 space-y-2 rounded-sm">
                         <div className="flex flex-wrap items-center gap-2">
                           <h2 className="font-semibold">{job.title}</h2>
                           <Badge variant={job.status === "open" || job.status === "reopened" ? "secondary" : "outline"} className="capitalize">
@@ -384,7 +453,11 @@ export function AdminJobs({
                           <span>{job.department}</span>
                           <span>{job.location}</span>
                           <span>{job.experience}</span>
-                          <span>{job.assessmentResourceLabel} assessment</span>
+                          <span>
+                            {job.assessments.length
+                              ? `${job.assessments.length} assessments`
+                              : "No assessment"}
+                          </span>
                           <span>Updated {formatDate(job.updatedAt)}</span>
                         </div>
                         <div className="flex min-w-0 flex-wrap gap-2">
@@ -394,7 +467,18 @@ export function AdminJobs({
                             </Badge>
                           ))}
                         </div>
-                      </div>
+                      </Link>
+                      {job.assessments.length ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {job.assessments.map((assessment) => (
+                            <Badge key={assessment.id} variant="secondary" className="max-w-full rounded-md">
+                              <span className="truncate">
+                                {assessment.code} · {assessment.name}
+                              </span>
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="grid grid-cols-2 gap-2 sm:flex">
                         {getStatusActions(job.status).map((action) => (
                           <Button
@@ -418,6 +502,35 @@ export function AdminJobs({
                   <p className="mt-1 text-sm text-muted-foreground">Create a job or change the search term.</p>
                 </div>
               ) : null}
+              <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Page {pagination.page} of {pagination.totalPages} · {pagination.total} total jobs
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading || pagination.page <= 1}
+                    onClick={() => {
+                      setLoading(true);
+                      void loadJobs(pagination.page - 1);
+                    }}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading || pagination.page >= pagination.totalPages}
+                    onClick={() => {
+                      setLoading(true);
+                      void loadJobs(pagination.page + 1);
+                    }}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -452,20 +565,73 @@ export function AdminJobs({
                     </select>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="assessment-resource">Assessment</Label>
-                  <select
-                    id="assessment-resource"
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm shadow-xs outline-none"
-                    value={form.assessmentResourceId}
-                    onChange={(event) => updateForm("assessmentResourceId", event.target.value)}
+                <div ref={assessmentPickerRef} className="relative space-y-2">
+                  <Label>Assessments</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-auto min-h-10 w-full justify-between"
+                    onClick={() => setAssessmentPickerOpen((value) => !value)}
                   >
-                    {assessmentResources.map((resource) => (
-                      <option key={resource.id} value={resource.id}>
-                        {resource.label}
-                      </option>
-                    ))}
-                  </select>
+                    <span className="min-w-0 truncate text-left">
+                      {selectedAssessments.length
+                        ? `${selectedAssessments.length} selected`
+                        : "Select assessments"}
+                    </span>
+                    <Search className="size-4 shrink-0 text-muted-foreground" />
+                  </Button>
+                  {selectedAssessments.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedAssessments.map((assessment) => (
+                        <Badge key={assessment.id} variant="secondary" className="max-w-full rounded-md">
+                          <span className="truncate">
+                            {assessment.code} · {assessment.name}
+                          </span>
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                  {assessmentPickerOpen ? (
+                    <div className="absolute z-20 w-full rounded-md border bg-card p-3 shadow-lg">
+                      <div className="relative mb-3">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={assessmentSearch}
+                          onChange={(event) => setAssessmentSearch(event.target.value)}
+                          className="h-9 pl-9 focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
+                          placeholder="Search code, title, bank, or tag"
+                        />
+                      </div>
+                      <div className="max-h-64 space-y-2 overflow-y-auto">
+                        {filteredAssessments.map((assessment) => (
+                          <label
+                            key={assessment.id}
+                            className="flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm hover:bg-muted/40"
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-1 size-4 accent-primary"
+                              checked={form.assessmentIds.includes(assessment.id)}
+                              onChange={() => toggleAssessment(assessment.id)}
+                            />
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium">
+                                {assessment.code} · {assessment.name}
+                              </span>
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {assessment.questionBankName}
+                              </span>
+                            </span>
+                          </label>
+                        ))}
+                        {!filteredAssessments.length ? (
+                          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                            No assessments found.
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="description">Description</Label>

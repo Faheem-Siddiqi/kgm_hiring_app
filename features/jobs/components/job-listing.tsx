@@ -21,7 +21,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { PublicJob } from "@/lib/job-types";
+import type { Pagination, PublicJob } from "@/lib/job-types";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -29,7 +29,13 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-export function JobListing({ jobs }: { jobs: PublicJob[] }) {
+export function JobListing({
+  jobs,
+  pagination,
+}: {
+  jobs: PublicJob[];
+  pagination: Pagination;
+}) {
   const [searchQuery, setSearchQuery] = useState("");
   const [department, setDepartment] = useState("All");
   const [experience, setExperience] = useState("All");
@@ -99,7 +105,7 @@ export function JobListing({ jobs }: { jobs: PublicJob[] }) {
                 Find the right KGM assessment path
               </h1>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                Browse dummy job openings, review role details, and start the
+                Browse open job postings, review role details, and start the
                 assessment flow from the job that matches your application.
               </p>
             </div>
@@ -219,11 +225,36 @@ export function JobListing({ jobs }: { jobs: PublicJob[] }) {
                     </span>
                     <span className="flex items-center gap-2">
                       <SlidersHorizontal className="size-3.5" />
-                      {job.experience}
+                      {job.assessments.length
+                        ? `${job.assessments.length} assessment${job.assessments.length === 1 ? "" : "s"}`
+                        : job.experience}
                     </span>
                   </div>
                 </Link>
               ))}
+            </div>
+
+            <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Page {pagination.page} of {pagination.totalPages} · {pagination.total} total jobs
+              </p>
+              <div className="flex gap-2">
+                <Button asChild variant="outline" size="sm" disabled={pagination.page <= 1}>
+                  <Link href={`/jobs?page=${Math.max(1, pagination.page - 1)}&pageSize=${pagination.pageSize}`}>
+                    Previous
+                  </Link>
+                </Button>
+                <Button
+                  asChild
+                  variant="outline"
+                  size="sm"
+                  disabled={pagination.page >= pagination.totalPages}
+                >
+                  <Link href={`/jobs?page=${Math.min(pagination.totalPages, pagination.page + 1)}&pageSize=${pagination.pageSize}`}>
+                    Next
+                  </Link>
+                </Button>
+              </div>
             </div>
 
             {!filteredJobs.length ? (

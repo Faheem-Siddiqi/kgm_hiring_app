@@ -1,0 +1,86 @@
+{
+  "assessments": [
+    {
+      "code": "KGM-ASMT-SAMPLE-001",
+      "name": "Finance Officer Screening",
+      "description": "Finance operations assessment covering reconciliation, reporting, and document control.",
+      "questionBankId": "assistant-manager"
+    },
+    {
+      "code": "KGM-ASMT-SAMPLE-002",
+      "name": "HR Operations Screening",
+      "description": "HR assessment covering employee records, scheduling, communication, and onboarding judgment.",
+      "questionBankId": "assistant-hr-officer"
+    },
+    {
+      "code": "KGM-ASMT-SAMPLE-003",
+      "name": "Admin Coordination Screening",
+      "description": "Administration assessment covering office coordination, follow-up discipline, and scenario handling.",
+      "questionBankId": "admin-officer"
+    },
+    {
+      "code": "KGM-ASMT-SAMPLE-004",
+      "name": "Communication And Documentation Screening",
+      "description": "Cross-functional assessment for writing clarity, record accuracy, and structured responses.",
+      "questionBankId": "assistant-hr-officer"
+    },
+    {
+      "code": "KGM-ASMT-SAMPLE-005",
+      "name": "Operations Judgment Screening",
+      "description": "Scenario-based assessment for practical judgment, prioritization, and workplace decision making.",
+      "questionBankId": "admin-officer"
+    }
+  ],
+  "jobs": [
+    {
+      "title": "Finance Officer",
+      "department": "Finance",
+      "location": "KGM OnSite",
+      "experience": "Mid Level",
+      "status": "open",
+      "summary": "Support financial reporting, reconciliations, payment documentation, and audit-ready records.",
+      "tags": ["Finance", "Excel", "Reporting"],
+      "assessmentCodes": ["KGM-ASMT-SAMPLE-001", "KGM-ASMT-SAMPLE-004"]
+    },
+    {
+      "title": "Assistant HR Officer",
+      "department": "Human Resources",
+      "location": "KTM OnSite",
+      "experience": "Fresh",
+      "status": "open",
+      "summary": "Assist with employee records, onboarding coordination, interview scheduling, and HR documentation.",
+      "tags": ["HR", "Records", "Onboarding"],
+      "assessmentCodes": ["KGM-ASMT-SAMPLE-002", "KGM-ASMT-SAMPLE-004"]
+    },
+    {
+      "title": "Admin Officer",
+      "department": "Administration",
+      "location": "KGM Remote",
+      "experience": "Experienced",
+      "status": "open",
+      "summary": "Manage office coordination, vendor follow-ups, facility requests, and administrative reporting.",
+      "tags": ["Admin", "Coordination", "Vendors"],
+      "assessmentCodes": ["KGM-ASMT-SAMPLE-003", "KGM-ASMT-SAMPLE-005"]
+    },
+    {
+      "title": "Operations Assistant",
+      "department": "Operations",
+      "location": "KTM Remote",
+      "experience": "Fresh",
+      "status": "open",
+      "summary": "Support daily task tracking, internal updates, operational records, and issue escalation.",
+      "tags": ["Operations", "Tracking", "Coordination"],
+      "assessmentCodes": ["KGM-ASMT-SAMPLE-005"]
+    },
+    {
+      "title": "Documentation Coordinator",
+      "department": "Administration",
+      "location": "KGM OnSite",
+      "experience": "Mid Level",
+      "status": "open",
+      "summary": "Maintain structured documents, follow up on missing records, and prepare clean status summaries.",
+      "tags": ["Documentation", "Records", "Follow-up"],
+      "assessmentCodes": ["KGM-ASMT-SAMPLE-004"]
+    }
+  ]
+}

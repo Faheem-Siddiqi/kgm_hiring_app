@@ -23,6 +23,15 @@ export type JobAssessmentResourceOption = {
   label: string;
 };
 
+export type JobAssessmentOption = {
+  id: string;
+  code: string;
+  name: string;
+  questionBankName: string;
+  questionBankId: string;
+  tags: string[];
+};
+
 export type PublicJob = {
   id: string;
   slug: string;
@@ -36,8 +45,10 @@ export type PublicJob = {
   responsibilities: string[];
   requirements: string[];
   tags: string[];
-  assessmentResourceId: string;
-  assessmentResourceLabel: string;
+  assessmentIds: string[];
+  assessments: JobAssessmentOption[];
+  assessmentResourceId?: string;
+  assessmentResourceLabel?: string;
   createdAt: string;
   updatedAt: string;
   reopenedAt?: string;
@@ -49,4 +60,11 @@ export type JobListSummary = {
   paused: number;
   closed: number;
   reopened: number;
+};
+
+export type Pagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 };

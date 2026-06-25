@@ -2,15 +2,15 @@ import "server-only";
 
 import { ObjectId, type Collection, type Db, type WithId } from "mongodb";
 import { getDatabase } from "@/db";
-import { assessmentResourceSummaries } from "@/features/test/assessment-resources";
 import {
   JOB_EXPERIENCE_LEVELS,
   JOB_LOCATIONS,
   JOB_STATUSES,
-  type JobAssessmentResourceOption,
+  type JobAssessmentOption,
   type JobExperience,
   type JobListSummary,
   type JobLocation,
+  type Pagination,
   type JobStatus,
   type PublicJob,
 } from "@/lib/job-types";
@@ -27,10 +27,20 @@ export type JobDocument = {
   responsibilities: string[];
   requirements: string[];
   tags: string[];
-  assessmentResourceId: string;
+  assessmentIds: ObjectId[];
   createdAt: Date;
   updatedAt: Date;
   reopenedAt?: Date;
+};
+
+type JobAggregateDocument = WithId<JobDocument> & {
+  assessments?: Array<{
+    _id: ObjectId;
+    code: string;
+    name: string;
+    questionBankName?: string;
+    questionBankId?: string;
+  }>;
 };
 
 export class JobError extends Error {
@@ -43,86 +53,7 @@ export class JobError extends Error {
   }
 }
 
-const dummyJobs: Array<Omit<JobDocument, "createdAt" | "updatedAt">> = [
-  {
-    slug: "finance-officer",
-    title: "Finance Officer",
-    department: "Finance",
-    location: "KGM OnSite",
-    experience: "Mid Level",
-    status: "open",
-    summary:
-      "Support monthly reporting, reconciliations, vendor payments, and audit-ready documentation for KGM operations.",
-    description:
-      "This role is designed for a detail-oriented finance professional who can keep daily records accurate while supporting leadership with timely reporting.",
-    responsibilities: [
-      "Prepare reconciliations and support month-end closing activities.",
-      "Review invoices, payments, and supporting documents before approval.",
-      "Coordinate with operations teams on expense records and reporting needs.",
-      "Maintain audit-friendly files and flag gaps early.",
-    ],
-    requirements: [
-      "Bachelor's degree in Finance, Accounting, or a related field.",
-      "Relevant finance or accounts experience.",
-      "Comfort with Excel, reconciliations, and documentation control.",
-    ],
-    tags: ["Accounts", "Excel", "Reporting"],
-    assessmentResourceId: "assistant-manager",
-  },
-  {
-    slug: "assistant-hr-officer",
-    title: "Assistant HR Officer",
-    department: "Human Resources",
-    location: "KTM OnSite",
-    experience: "Fresh",
-    status: "open",
-    summary:
-      "Assist with onboarding, employee records, attendance coordination, and recruitment documentation.",
-    description:
-      "The Assistant HR Officer supports day-to-day HR operations with clean records, responsive communication, and consistent follow-through.",
-    responsibilities: [
-      "Maintain employee files, onboarding checklists, and HR trackers.",
-      "Support interview scheduling and candidate communication.",
-      "Coordinate attendance and leave documentation with department leads.",
-      "Prepare simple HR summaries for review.",
-    ],
-    requirements: [
-      "Bachelor's degree in HR, Business Administration, or related discipline.",
-      "Strong written communication and documentation habits.",
-      "Ability to handle confidential employee information responsibly.",
-    ],
-    tags: ["HR", "Records", "Onboarding"],
-    assessmentResourceId: "assistant-hr-officer",
-  },
-  {
-    slug: "admin-officer",
-    title: "Admin Officer",
-    department: "Administration",
-    location: "KGM Remote",
-    experience: "Experienced",
-    status: "paused",
-    summary:
-      "Manage office coordination, vendor follow-ups, facility requests, and administrative reporting.",
-    description:
-      "This position keeps administrative work moving smoothly across teams with organized follow-up and clear reporting.",
-    responsibilities: [
-      "Track office requests and coordinate timely resolution.",
-      "Work with vendors on supplies, services, and documentation.",
-      "Prepare administrative summaries and maintain records.",
-      "Support internal teams with day-to-day coordination.",
-    ],
-    requirements: [
-      "Administration or operations coordination experience.",
-      "Good follow-up discipline and written communication skills.",
-      "Comfort managing multiple small tasks without losing detail.",
-    ],
-    tags: ["Admin", "Coordination", "Vendors"],
-    assessmentResourceId: "admin-officer",
-  },
-];
-
 let indexesReady: Promise<void> | null = null;
-let seedsReady: Promise<void> | null = null;
 
 function normalizeSlug(value: string) {
   return value
@@ -148,32 +79,6 @@ function uniqueValues(values: string[], max = 50) {
     .slice(0, max);
 }
 
-function formatResourceLabel(resourceId: string) {
-  return resourceId
-    .replace(/\.json$/i, "")
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
-    .join(" ");
-}
-
-export function getJobAssessmentResourceOptions(): JobAssessmentResourceOption[] {
-  return assessmentResourceSummaries.map((resource) => ({
-    id: resource.id,
-    label: formatResourceLabel(resource.id),
-  }));
-}
-
-function assertAssessmentResourceId(value: string) {
-  const options = getJobAssessmentResourceOptions();
-
-  if (options.some((option) => option.id === value)) {
-    return value;
-  }
-
-  throw new JobError("Assessment resource is not valid.", 400);
-}
-
 function assertOption<T extends readonly string[]>(
   value: string,
   allowed: T,
@@ -183,8 +88,36 @@ function assertOption<T extends readonly string[]>(
   throw new JobError(`${label} is not valid.`, 400);
 }
 
-function toPublicJob(job: WithId<JobDocument>): PublicJob {
-  const assessmentResourceId = job.assessmentResourceId ?? "admin-officer";
+function getQuestionBankLabel(questionBankId?: string) {
+  return questionBankId
+    ? questionBankId
+        .split(/[-_\s]+/)
+        .filter(Boolean)
+        .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
+        .join(" ")
+    : "Assessment";
+}
+
+function toPublicAssessmentOption(
+  assessment: NonNullable<JobAggregateDocument["assessments"]>[number],
+): JobAssessmentOption {
+  return {
+    id: assessment._id.toString(),
+    code: assessment.code,
+    name: assessment.name,
+    questionBankName:
+      assessment.questionBankName ?? getQuestionBankLabel(assessment.questionBankId),
+    questionBankId: assessment.questionBankId ?? "",
+    tags: [
+      assessment.code,
+      assessment.name,
+      assessment.questionBankName ?? getQuestionBankLabel(assessment.questionBankId),
+    ],
+  };
+}
+
+function toPublicJob(job: JobAggregateDocument): PublicJob {
+  const assessments = (job.assessments ?? []).map(toPublicAssessmentOption);
 
   return {
     id: job._id.toString(),
@@ -199,8 +132,10 @@ function toPublicJob(job: WithId<JobDocument>): PublicJob {
     responsibilities: job.responsibilities,
     requirements: job.requirements,
     tags: job.tags,
-    assessmentResourceId,
-    assessmentResourceLabel: formatResourceLabel(assessmentResourceId),
+    assessmentIds: (job.assessmentIds ?? []).map((id) => id.toString()),
+    assessments,
+    assessmentResourceId: assessments[0]?.id,
+    assessmentResourceLabel: assessments[0]?.name,
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
     ...(job.reopenedAt ? { reopenedAt: job.reopenedAt.toISOString() } : {}),
@@ -212,6 +147,7 @@ async function ensureJobIndexes(database: Db) {
     indexesReady = Promise.all([
       database.collection<JobDocument>("jobs").createIndex({ slug: 1 }, { unique: true }),
       database.collection<JobDocument>("jobs").createIndex({ status: 1, updatedAt: -1 }),
+      database.collection<JobDocument>("jobs").createIndex({ assessmentIds: 1 }),
     ])
       .then(() => undefined)
       .catch((error) => {
@@ -229,38 +165,6 @@ async function getJobCollection(): Promise<Collection<JobDocument>> {
   return database.collection<JobDocument>("jobs");
 }
 
-async function seedJobs() {
-  const jobs = await getJobCollection();
-  const now = new Date();
-
-  await jobs.bulkWrite(
-    dummyJobs.map((job) => ({
-      updateOne: {
-        filter: { slug: job.slug },
-        update: {
-          $setOnInsert: {
-            ...job,
-            createdAt: now,
-            updatedAt: now,
-          },
-        },
-        upsert: true,
-      },
-    })),
-  );
-}
-
-async function ensureJobSeeds() {
-  if (!seedsReady) {
-    seedsReady = seedJobs().catch((error) => {
-      seedsReady = null;
-      throw error;
-    });
-  }
-
-  return seedsReady;
-}
-
 export function parseJobInput(input: {
   title?: string;
   department?: string;
@@ -272,7 +176,7 @@ export function parseJobInput(input: {
   responsibilities?: string[];
   requirements?: string[];
   tags?: string[];
-  assessmentResourceId?: string;
+  assessmentIds?: unknown;
 }) {
   const title = input.title?.trim() ?? "";
   const department = input.department?.trim() ?? "";
@@ -290,6 +194,12 @@ export function parseJobInput(input: {
     throw new JobError("At least one responsibility and one requirement are required.", 400);
   }
 
+  const assessmentIds = sanitizeAssessmentIds(input.assessmentIds);
+
+  if (!assessmentIds.length) {
+    throw new JobError("Select at least one assessment for this job.", 400);
+  }
+
   return {
     title,
     department,
@@ -301,13 +211,67 @@ export function parseJobInput(input: {
     responsibilities,
     requirements,
     tags,
-    assessmentResourceId: assertAssessmentResourceId(input.assessmentResourceId ?? ""),
+    assessmentIds,
   };
 }
 
-export async function listJobs(options: { includeInactive?: boolean } = {}) {
-  await ensureJobSeeds();
+function sanitizeAssessmentIds(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean),
+    ),
+  ).map((item) => {
+    if (!ObjectId.isValid(item)) {
+      throw new JobError("Assessment is not valid.", 400);
+    }
+    return new ObjectId(item);
+  });
+}
+
+async function assertAssessmentsExist(assessmentIds: ObjectId[]) {
+  if (!assessmentIds.length) return;
+
+  const database = await getDatabase();
+  const count = await database
+    .collection("assessments")
+    .countDocuments({ _id: { $in: assessmentIds } });
+
+  if (count !== assessmentIds.length) {
+    throw new JobError("One or more selected assessments no longer exist.", 400);
+  }
+}
+
+function parsePage(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function parsePageSize(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(Math.floor(parsed), 50);
+}
+
+export function parsePaginationParams(searchParams: URLSearchParams) {
+  return {
+    page: parsePage(searchParams.get("page"), 1),
+    pageSize: parsePageSize(searchParams.get("pageSize"), 10),
+  };
+}
+
+export async function listJobs(
+  options: { includeInactive?: boolean; page?: number; pageSize?: number } = {},
+) {
   const jobs = await getJobCollection();
+  const page = parsePage(options.page, 1);
+  const pageSize = parsePageSize(options.pageSize, 10);
+  const skip = (page - 1) * pageSize;
   const match = options.includeInactive
     ? {}
     : { status: { $in: ["open", "reopened"] } };
@@ -315,15 +279,23 @@ export async function listJobs(options: { includeInactive?: boolean } = {}) {
     { $match: match },
     { $sort: { updatedAt: -1, createdAt: -1 } },
     {
+      $lookup: {
+        from: "assessments",
+        localField: "assessmentIds",
+        foreignField: "_id",
+        as: "assessments",
+      },
+    },
+    {
       $facet: {
-        jobs: [{ $limit: 100 }],
+        jobs: [{ $skip: skip }, { $limit: pageSize }],
         statusCounts: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
         total: [{ $count: "count" }],
       },
     },
   ];
   const [result] = await jobs.aggregate<{
-    jobs: WithId<JobDocument>[];
+    jobs: JobAggregateDocument[];
     statusCounts: Array<{ _id: JobStatus; count: number }>;
     total: Array<{ count: number }>;
   }>(pipeline).toArray();
@@ -334,6 +306,13 @@ export async function listJobs(options: { includeInactive?: boolean } = {}) {
     closed: 0,
     reopened: 0,
   } satisfies JobListSummary;
+  const total = result?.total[0]?.count ?? 0;
+  const pagination = {
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  } satisfies Pagination;
 
   for (const item of result?.statusCounts ?? []) {
     summary[item._id] = item.count;
@@ -342,22 +321,37 @@ export async function listJobs(options: { includeInactive?: boolean } = {}) {
   return {
     jobs: (result?.jobs ?? []).map(toPublicJob),
     summary,
+    pagination,
   };
 }
 
 export async function getJobBySlug(slug: string, options: { includeInactive?: boolean } = {}) {
-  await ensureJobSeeds();
   const jobs = await getJobCollection();
-  const job = await jobs.findOne({
-    slug,
-    ...(options.includeInactive ? {} : { status: { $in: ["open", "reopened"] } }),
-  });
+  const [job] = await jobs
+    .aggregate<JobAggregateDocument>([
+      {
+        $match: {
+          slug,
+          ...(options.includeInactive ? {} : { status: { $in: ["open", "reopened"] } }),
+        },
+      },
+      {
+        $lookup: {
+          from: "assessments",
+          localField: "assessmentIds",
+          foreignField: "_id",
+          as: "assessments",
+        },
+      },
+      { $limit: 1 },
+    ])
+    .toArray();
 
   return job ? toPublicJob(job) : null;
 }
 
 export async function createJob(input: ReturnType<typeof parseJobInput>) {
-  await ensureJobSeeds();
+  await assertAssessmentsExist(input.assessmentIds);
   const jobs = await getJobCollection();
   const now = new Date();
   const baseSlug = normalizeSlug(input.title);
@@ -369,21 +363,20 @@ export async function createJob(input: ReturnType<typeof parseJobInput>) {
     counter += 1;
   }
 
-  const result = await jobs.insertOne({
+  await jobs.insertOne({
     ...input,
     slug,
     createdAt: now,
     updatedAt: now,
     ...(input.status === "reopened" ? { reopenedAt: now } : {}),
   });
-  const job = await jobs.findOne({ _id: result.insertedId });
+  const job = await getJobBySlug(slug, { includeInactive: true });
 
   if (!job) throw new JobError("Job was created but could not be loaded.", 500);
-  return toPublicJob(job);
+  return job;
 }
 
 export async function updateJobStatus(jobId: string, status: JobStatus) {
-  await ensureJobSeeds();
   const jobs = await getJobCollection();
   const objectId = new ObjectId(jobId);
   const now = new Date();
@@ -393,8 +386,33 @@ export async function updateJobStatus(jobId: string, status: JobStatus) {
       : { $set: { status, updatedAt: now }, $unset: { reopenedAt: "" as const } };
 
   await jobs.updateOne({ _id: objectId }, update);
-  const job = await jobs.findOne({ _id: objectId });
+  const job = await jobs.findOne({ _id: objectId }, { projection: { slug: 1 } });
 
   if (!job) throw new JobError("Job was not found.", 404);
-  return toPublicJob(job);
+  const publicJob = await getJobBySlug(job.slug, { includeInactive: true });
+  if (!publicJob) throw new JobError("Job was not found.", 404);
+  return publicJob;
+}
+
+export async function updateJob(jobId: string, input: ReturnType<typeof parseJobInput>) {
+  await assertAssessmentsExist(input.assessmentIds);
+  const jobs = await getJobCollection();
+  const objectId = new ObjectId(jobId);
+  const now = new Date();
+  const existing = await jobs.findOne({ _id: objectId }, { projection: { slug: 1 } });
+
+  if (!existing) {
+    throw new JobError("Job was not found.", 404);
+  }
+
+  await jobs.updateOne(
+    { _id: objectId },
+    input.status === "reopened"
+      ? { $set: { ...input, updatedAt: now, reopenedAt: now } }
+      : { $set: { ...input, updatedAt: now }, $unset: { reopenedAt: "" as const } },
+  );
+
+  const publicJob = await getJobBySlug(existing.slug, { includeInactive: true });
+  if (!publicJob) throw new JobError("Job was not found.", 404);
+  return publicJob;
 }

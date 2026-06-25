@@ -3,7 +3,7 @@ import { getAssessmentById } from "@/lib/assessments";
 import { AdminAssessmentDetail } from "@/features/test/components/admin-assessment-detail";
 import { AssessmentAnalytics } from "@/features/test/components/assessment-analytics";
 
-export default async function AssessmentPage({
+export default async function AssessmentDetailPage({
   params,
 }: {
   params: Promise<{ assessmentId: string }>;

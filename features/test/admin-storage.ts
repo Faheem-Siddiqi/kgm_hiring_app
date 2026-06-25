@@ -265,6 +265,16 @@ export function createJobAssessment({
   return job;
 }
 
+export function upsertJobAssessment(job: JobAssessment) {
+  const existingJobs = readJobAssessments();
+  const nextJobs = existingJobs.some((item) => item.id === job.id)
+    ? existingJobs.map((item) => (item.id === job.id ? { ...item, ...job } : item))
+    : [job, ...existingJobs];
+
+  writeJson(JOBS_STORAGE_KEY, nextJobs);
+  return job;
+}
+
 export function updateJobAssessmentConfig(
   id: string,
   updates: Pick<

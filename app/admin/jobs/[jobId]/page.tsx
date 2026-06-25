@@ -1,22 +1,30 @@
-import { AdminJobs } from "@/features/jobs/components/admin-jobs";
+import { notFound } from "next/navigation";
+import { AdminJobDetail } from "@/features/jobs/components/admin-job-detail";
 import { requireAdminPageSession } from "@/lib/admin-auth";
 import { listAssessments } from "@/lib/assessments";
-import { listJobs } from "@/lib/jobs";
+import { getJobBySlug } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminJobsPage() {
+export default async function AdminJobDetailPage({
+  params,
+}: {
+  params: Promise<{ jobId: string }>;
+}) {
   await requireAdminPageSession();
-  const [{ jobs, summary, pagination }, assessmentSetup] = await Promise.all([
-    listJobs({ includeInactive: true }),
+  const { jobId } = await params;
+  const [job, assessmentSetup] = await Promise.all([
+    getJobBySlug(jobId, { includeInactive: true }),
     listAssessments(),
   ]);
 
+  if (!job) {
+    notFound();
+  }
+
   return (
-    <AdminJobs
-      initialJobs={jobs}
-      initialSummary={summary}
-      initialPagination={pagination}
+    <AdminJobDetail
+      job={job}
       assessments={assessmentSetup.assessments.map((assessment) => ({
         id: assessment.id,
         code: assessment.code,
@@ -27,7 +35,7 @@ export default async function AdminJobsPage() {
           assessment.code,
           assessment.name,
           assessment.questionBankName,
-          ...assessment.assignedJobs.map((job) => job.title),
+          ...assessment.assignedJobs.map((assignedJob) => assignedJob.title),
         ],
       }))}
     />
