@@ -17,6 +17,8 @@ export type Candidate = {
   otpCode: string;
   cvUrl: string;
   invitedAt: string;
+  inviteEmailStatus?: "pending" | "sent" | "failed";
+  inviteEmailFailure?: string;
 };
 
 export type JobAssessment = {
@@ -54,6 +56,10 @@ export type AssessmentResult = {
   status: "Submitted" | "Auto submitted";
   violations: AssessmentViolation[];
   answers?: AssessmentAnswers;
+  textScores?: Record<string, number>;
+  adminRemark?: string;
+  evaluatedAt?: string;
+  decision?: "accepted" | "rejected" | "forwarded";
 };
 
 const JOBS_STORAGE_KEY = "kgm-hiring-admin-jobs";
@@ -62,41 +68,8 @@ const RESULTS_STORAGE_KEY = "kgm-hiring-admin-results";
 const ACTIVE_JOB_STORAGE_KEY = "kgm-hiring-active-assessment-id";
 export const VIOLATIONS_STORAGE_KEY = "kgm-hiring-assessment-violations";
 
-const defaultJobs: JobAssessment[] = [
-  {
-    id: "assistant-admin-officer",
-    title: "Assistant Admin Officer Assessment",
-    role: "Assistant Admin Officer",
-    createdAt: "2026-06-18T00:00:00.000Z",
-    resourceId: "admin-officer",
-    sectionCount: 3,
-    timePerSectionMinutes: 15,
-    questionsPerTest: 20,
-    questionsPerSection: 20,
-    dummyQuestionsPerSection: 3,
-  },
-];
-
-const defaultCandidates: Candidate[] = [
-  {
-    id: "candidate-aisha",
-    name: "Aisha Khan",
-    email: "aisha.khan@example.com",
-    jobId: "assistant-admin-officer",
-    otpCode: "482913",
-    cvUrl: "https://drive.google.com/file/d/preview-aisha/view",
-    invitedAt: "2026-06-18T00:00:00.000Z",
-  },
-  {
-    id: "candidate-bilal",
-    name: "Bilal Ahmed",
-    email: "bilal.ahmed@example.com",
-    jobId: "assistant-admin-officer",
-    otpCode: "739204",
-    cvUrl: "https://drive.google.com/file/d/preview-bilal/view",
-    invitedAt: "2026-06-18T00:00:00.000Z",
-  },
-];
+const defaultJobs: JobAssessment[] = [];
+const defaultCandidates: Candidate[] = [];
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -179,6 +152,41 @@ export function readAssessmentResults() {
   return readJson<AssessmentResult[]>(RESULTS_STORAGE_KEY, []);
 }
 
+function calculateAssessmentScore(
+  sections: ReturnType<typeof readActiveAssessmentSections>,
+  answers: AssessmentAnswers,
+  textScores: Record<string, number> = {},
+) {
+  const questions = sections.flatMap((section) => section.questions);
+  const totalPoints = questions.reduce(
+    (total, question) => total + (question.type === "text" ? 10 : 1),
+    0,
+  );
+  const earnedPoints = questions.reduce((total, question) => {
+    if (question.type === "text") {
+      return total + Math.min(10, Math.max(0, textScores[question.id] ?? 0));
+    }
+
+    const expected = question.correctAnswers ?? [];
+    const provided = (answers[question.id] ?? "").split("||").filter(Boolean);
+
+    if (!expected.length) return total;
+    if (question.type === "mcq") {
+      return total + (provided[0] === expected[0] ? 1 : 0);
+    }
+
+    const correctSelections = provided.filter((value) => expected.includes(value)).length;
+    const incorrectSelections = provided.filter((value) => !expected.includes(value)).length;
+    const partialCredit = Math.max(
+      0,
+      correctSelections / expected.length - incorrectSelections / expected.length,
+    );
+    return total + partialCredit;
+  }, 0);
+
+  return totalPoints ? Math.round((earnedPoints / totalPoints) * 100) : 0;
+}
+
 export function readAssessmentViolations() {
   return readJson<AssessmentViolation[]>(VIOLATIONS_STORAGE_KEY, []);
 }
@@ -187,12 +195,12 @@ export function readActiveJobAssessment() {
   const jobs = readJobAssessments();
 
   if (typeof window === "undefined") {
-    return jobs[0] ?? defaultJobs[0];
+    return jobs[0];
   }
 
   const activeJobId = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
 
-  return jobs.find((job) => job.id === activeJobId) ?? jobs[0] ?? defaultJobs[0];
+  return jobs.find((job) => job.id === activeJobId) ?? jobs[0];
 }
 
 export function writeActiveJobAssessment(jobId: string) {
@@ -202,6 +210,10 @@ export function writeActiveJobAssessment(jobId: string) {
 
 export function readActiveAssessmentSections() {
   const job = readActiveJobAssessment();
+
+  if (!job) {
+    return assessmentSections;
+  }
 
   return buildAssessmentSectionsFromResource({
     resourceId: job.resourceId,
@@ -383,11 +395,31 @@ export function createCandidate(name: string, email: string, jobId: string) {
     otpCode: createOtpCode(),
     cvUrl: "https://drive.google.com/file/d/sample-cv-preview/view",
     invitedAt: new Date().toISOString(),
+    inviteEmailStatus: "pending",
   };
 
   writeJson(CANDIDATES_STORAGE_KEY, [candidate, ...readCandidates()]);
   writeActiveJobAssessment(jobId);
   return candidate;
+}
+
+export function updateCandidateInviteEmailStatus(
+  candidateId: string,
+  status: NonNullable<Candidate["inviteEmailStatus"]>,
+  failure?: string | null,
+) {
+  const candidates = readCandidates().map((candidate) =>
+    candidate.id === candidateId
+      ? {
+          ...candidate,
+          inviteEmailStatus: status,
+          inviteEmailFailure: failure ?? undefined,
+        }
+      : candidate,
+  );
+
+  writeJson(CANDIDATES_STORAGE_KEY, candidates);
+  return candidates.find((candidate) => candidate.id === candidateId) ?? null;
 }
 
 export function createViolation(sectionSlug: string, reason: string) {
@@ -428,30 +460,11 @@ export function saveAssessmentResult({
   const answeredCount = sections
     .flatMap((section) => section.questions.map((question) => question.id))
     .filter((id) => answers[id]?.trim()).length;
-  const objectiveQuestions = sections
-    .flatMap((section) => section.questions)
-    .filter((question) => question.type !== "text");
-  const earnedPoints = objectiveQuestions.reduce((total, question) => {
-    const expected = question.correctAnswers ?? [];
-    const provided = (answers[question.id] ?? "").split("||").filter(Boolean);
-
-    if (!expected.length) return total;
-    if (question.type === "mcq") {
-      return total + (provided[0] === expected[0] ? 1 : 0);
-    }
-
-    const correctSelections = provided.filter((value) => expected.includes(value)).length;
-    const incorrectSelections = provided.filter((value) => !expected.includes(value)).length;
-    const partialCredit = Math.max(
-      0,
-      correctSelections / expected.length - incorrectSelections / expected.length,
-    );
-    return total + partialCredit;
-  }, 0);
-  const score = objectiveQuestions.length
-    ? Math.round((earnedPoints / objectiveQuestions.length) * 100)
-    : 0;
-  const assessment = readActiveJobAssessment() ?? jobs[0] ?? defaultJobs[0];
+  const score = calculateAssessmentScore(sections, answers);
+  const assessment = readActiveJobAssessment() ?? jobs[0];
+  if (!assessment) {
+    throw new Error("No active assessment is available for submission.");
+  }
   const candidate = candidates.find((item) => item.jobId === assessment.id) ?? {
     name: "Preview Candidate",
     email: "candidate@example.com",
@@ -474,4 +487,44 @@ export function saveAssessmentResult({
   writeJson(RESULTS_STORAGE_KEY, [result, ...readAssessmentResults()]);
   clearAssessmentViolations();
   return result;
+}
+
+export function updateAssessmentReview(
+  resultId: string,
+  updates: {
+    textScores?: Record<string, number>;
+    adminRemark?: string;
+    decision?: AssessmentResult["decision"];
+  },
+) {
+  const results = readAssessmentResults();
+  const nextResults = results.map((result) => {
+    if (result.id !== resultId) {
+      return result;
+    }
+
+    const job = readJobAssessments().find((item) => item.id === result.assessmentId);
+    const sections = job
+      ? buildAssessmentSectionsFromResource({
+          resourceId: job.resourceId,
+          sectionCount: job.sectionCount,
+          questionsPerSection: job.questionsPerSection,
+          timePerSectionMinutes: job.timePerSectionMinutes,
+          seed: job.id,
+          sectionTypeConfigs: job.sectionTypeConfigs,
+        })
+      : readActiveAssessmentSections();
+    const textScores = { ...(result.textScores ?? {}), ...(updates.textScores ?? {}) };
+
+    return {
+      ...result,
+      ...updates,
+      textScores,
+      score: calculateAssessmentScore(sections, result.answers ?? {}, textScores),
+      evaluatedAt: new Date().toISOString(),
+    };
+  });
+
+  writeJson(RESULTS_STORAGE_KEY, nextResults);
+  return nextResults.find((result) => result.id === resultId) ?? null;
 }

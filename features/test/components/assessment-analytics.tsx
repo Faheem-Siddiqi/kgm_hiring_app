@@ -8,8 +8,10 @@ import {
   BarChart3,
   CheckCircle2,
   Clock,
+  Copy,
   ExternalLink,
   FileText,
+  Loader2,
   Mail,
   Send,
   Settings2,
@@ -29,11 +31,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
 import {
   createCandidate,
   readAdminDataSnapshot,
   subscribeToAdminData,
   saveSectionQuestionTypeConfigs,
+  updateAssessmentReview,
+  updateCandidateInviteEmailStatus,
   type AssessmentResult,
   type Candidate,
   type JobAssessment,
@@ -48,6 +53,11 @@ type AdminSnapshot = {
   candidates?: Candidate[];
   jobs?: JobAssessment[];
   results?: AssessmentResult[];
+};
+
+type CandidateInviteResponse = {
+  message?: string;
+  mail?: { sent?: boolean; reason?: string | null };
 };
 
 function useAdminData() {
@@ -91,6 +101,10 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
   const [settingsDraft, setSettingsDraft] = useState<Record<string, SectionQuestionTypeConfig>>({});
   const [savedSettings, setSavedSettings] = useState<Record<string, SectionQuestionTypeConfig>>({});
   const [settingsDirty, setSettingsDirty] = useState(false);
+  const [reviewRemark, setReviewRemark] = useState("");
+  const [forwardAdminEmail, setForwardAdminEmail] = useState("");
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
   const searchParams = useSearchParams();
   const { candidates, jobs, results } = useAdminData();
   const assessment = jobs.find((job) => job.id === assessmentId);
@@ -194,6 +208,69 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
     };
   }, [assessmentId, resourceSummary, storedSettingsSnapshot]);
 
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setReviewRemark(selectedSubmission?.adminRemark ?? "");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSubmission?.adminRemark, selectedSubmission?.id]);
+
+  async function copyText(value: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(successMessage);
+    } catch {
+      toast.error("Copy failed. Select the text and copy it manually.");
+    }
+  }
+
+  function buildCandidateLink(candidate: Candidate) {
+    const origin = typeof window === "undefined" ? "" : window.location.origin;
+    return `${origin}/?otp=${candidate.otpCode}`;
+  }
+
+  async function sendCandidateInvite(candidate: Candidate, assessmentTitle: string) {
+    let response: Response;
+    let payload: CandidateInviteResponse;
+
+    try {
+      response = await fetch("/api/admin/candidate-invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateName: candidate.name,
+          candidateEmail: candidate.email,
+          assessmentTitle,
+          otpCode: candidate.otpCode,
+          inviteUrl: buildCandidateLink(candidate),
+        }),
+      });
+      payload = (await response.json()) as CandidateInviteResponse;
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "Could not reach the mail service.";
+      updateCandidateInviteEmailStatus(candidate.id, "failed", reason);
+      toast.error("Email failed. Manual OTP is now available in the candidates table.");
+      return false;
+    }
+
+    if (!response.ok || !payload.mail?.sent) {
+      const reason = payload.mail?.reason ?? payload.message ?? "Email could not be sent.";
+      updateCandidateInviteEmailStatus(candidate.id, "failed", reason);
+      toast.error("Email failed. Manual OTP is now available in the candidates table.");
+      return false;
+    }
+
+    updateCandidateInviteEmailStatus(candidate.id, "sent");
+    toast.success(`Invite email sent to ${candidate.email}`);
+    return true;
+  }
+
   function updateSettingsDraft(
     sectionId: string,
     type: keyof SectionQuestionTypeConfig,
@@ -218,8 +295,13 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
     toast.success("Question settings saved");
   }
 
-  function handleSendInvite(event: FormEvent<HTMLFormElement>) {
+  async function handleSendInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!assessment) {
+      toast.error("Assessment details are not available.");
+      return;
+    }
 
     if (!candidateName.trim() || !candidateEmail.trim()) {
       toast.error("Candidate name and email are required");
@@ -231,9 +313,69 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
       candidateEmail.trim(),
       assessmentId,
     );
-    setCandidateName("");
-    setCandidateEmail("");
-    toast.success(`Invite email prepared for ${candidate.email}`);
+    setIsSendingInvite(true);
+    const sent = await sendCandidateInvite(candidate, assessment.title);
+    setIsSendingInvite(false);
+
+    if (sent) {
+      setCandidateName("");
+      setCandidateEmail("");
+    }
+  }
+
+  function updateTextScore(questionId: string, value: string) {
+    if (!selectedSubmission) return;
+    const score = Math.min(10, Math.max(0, Number(value)));
+    updateAssessmentReview(selectedSubmission.id, {
+      textScores: { [questionId]: Number.isFinite(score) ? score : 0 },
+    });
+  }
+
+  function saveRemark() {
+    if (!selectedSubmission) return;
+    updateAssessmentReview(selectedSubmission.id, { adminRemark: reviewRemark });
+    toast.success("Review remark saved");
+  }
+
+  function markEvaluated() {
+    if (!selectedSubmission) return;
+    setIsEvaluating(true);
+    window.setTimeout(() => {
+      updateAssessmentReview(selectedSubmission.id, { adminRemark: reviewRemark });
+      setIsEvaluating(false);
+      toast.success("Submission marked as evaluated");
+    }, 600);
+  }
+
+  function sendCandidateDecision(decision: "accepted" | "rejected") {
+    if (!selectedSubmission) return;
+    const assessmentTitle = assessment?.title ?? selectedSubmission.assessmentTitle;
+    updateAssessmentReview(selectedSubmission.id, { decision, adminRemark: reviewRemark });
+    const subject =
+      decision === "accepted"
+        ? `KGM assessment update - ${assessmentTitle}`
+        : `KGM assessment result - ${assessmentTitle}`;
+    const body =
+      decision === "accepted"
+        ? `Dear ${selectedSubmission.candidateName},%0D%0A%0D%0AThank you for completing the ${assessmentTitle}. Your profile has been shortlisted for the next review stage.%0D%0A%0D%0ARegards,%0D%0AKGM Hiring Team`
+        : `Dear ${selectedSubmission.candidateName},%0D%0A%0D%0AThank you for completing the ${assessmentTitle}. After review, we will not be moving forward at this stage.%0D%0A%0D%0ARegards,%0D%0AKGM Hiring Team`;
+    window.location.href = `mailto:${selectedSubmission.candidateEmail}?subject=${encodeURIComponent(subject)}&body=${body}`;
+  }
+
+  function forwardToAdmin() {
+    if (!selectedSubmission || !forwardAdminEmail.trim()) {
+      toast.error("Enter an admin email for forwarding.");
+      return;
+    }
+
+    updateAssessmentReview(selectedSubmission.id, {
+      decision: "forwarded",
+      adminRemark: reviewRemark,
+    });
+    const reviewLink = `${window.location.origin}/admin/submissions/${selectedSubmission.id}`;
+    const subject = `Candidate review requested - ${selectedSubmission.candidateName}`;
+    const body = `Please review this candidate:%0D%0A%0D%0AName: ${selectedSubmission.candidateName}%0D%0AScore: ${selectedSubmission.score}%25%0D%0ALink: ${reviewLink}%0D%0A%0D%0ARemark: ${encodeURIComponent(reviewRemark || "No remark added.")}`;
+    window.location.href = `mailto:${forwardAdminEmail.trim()}?subject=${encodeURIComponent(subject)}&body=${body}`;
   }
 
   if (!assessment) {
@@ -415,9 +557,9 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                     placeholder="candidate@example.com"
                   />
                 </div>
-                <Button className="self-end" type="submit">
-                  <Send className="size-4" />
-                  Send
+                <Button className="self-end" type="submit" disabled={isSendingInvite}>
+                  {isSendingInvite ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                  {isSendingInvite ? "Sending" : "Send invite"}
                 </Button>
               </form>
             </CardContent>
@@ -500,6 +642,7 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                 const result = assessmentResults.find(
                   (item) => item.candidateEmail === candidate.email,
                 );
+                const emailFailed = candidate.inviteEmailStatus === "failed";
 
                 return (
                   <div key={candidate.id} className="rounded-md border p-4">
@@ -517,8 +660,10 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                     <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
                       <div className="rounded-md bg-muted/40 p-3">
                         <Mail className="mb-2 size-4 text-muted-foreground" />
-                        <p className="text-xs text-muted-foreground">OTP</p>
-                        <p className="font-medium">{candidate.otpCode}</p>
+                        <p className="text-xs text-muted-foreground">Invite email</p>
+                        <p className="font-medium capitalize">
+                          {candidate.inviteEmailStatus ?? "sent"}
+                        </p>
                       </div>
                       <div className="rounded-md bg-muted/40 p-3">
                         <Clock className="mb-2 size-4 text-muted-foreground" />
@@ -546,6 +691,36 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                       >
                         View submission
                       </Button>
+                    ) : null}
+                    {emailFailed ? (
+                      <div className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 p-3">
+                        <p className="text-xs font-medium text-destructive">
+                          Email failed. Share this OTP manually.
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {candidate.inviteEmailFailure}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void copyText(candidate.otpCode, "OTP copied")}
+                          >
+                            <Copy className="size-4" />
+                            Copy OTP {candidate.otpCode}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void copyText(buildCandidateLink(candidate), "Candidate assessment link copied")}
+                          >
+                            <Copy className="size-4" />
+                            Copy invite link
+                          </Button>
+                        </div>
+                      </div>
                     ) : null}
                   </div>
                 );
@@ -679,6 +854,54 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                   )}
                 </div>
                 <div className="rounded-md border p-4">
+                  <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_260px]">
+                    <div className="space-y-2">
+                      <Label htmlFor="review-remark">Admin remark</Label>
+                      <Textarea
+                        id="review-remark"
+                        value={reviewRemark}
+                        onChange={(event) => setReviewRemark(event.target.value)}
+                        placeholder="Write review notes for this candidate..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="forward-admin">Forward to admin</Label>
+                      <Input
+                        id="forward-admin"
+                        type="email"
+                        value={forwardAdminEmail}
+                        onChange={(event) => setForwardAdminEmail(event.target.value)}
+                        placeholder="admin@example.com"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button type="button" variant="outline" onClick={saveRemark}>
+                          Save remark
+                        </Button>
+                        <Button type="button" variant="outline" onClick={forwardToAdmin}>
+                          Forward
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                  {isEvaluating ? (
+                    <div className="mb-4 grid gap-3 rounded-md border bg-muted/30 p-4">
+                      <div className="h-4 w-1/3 animate-pulse rounded bg-muted-foreground/20" />
+                      <div className="h-3 w-2/3 animate-pulse rounded bg-muted-foreground/20" />
+                      <div className="h-3 w-1/2 animate-pulse rounded bg-muted-foreground/20" />
+                    </div>
+                  ) : null}
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    <Button type="button" onClick={markEvaluated} disabled={isEvaluating}>
+                      {isEvaluating ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+                      Mark evaluated
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => sendCandidateDecision("accepted")}>
+                      Acceptance email
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => sendCandidateDecision("rejected")}>
+                      Rejection email
+                    </Button>
+                  </div>
                   <div className="mb-4">
                     <p className="text-sm font-medium">Answer review</p>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -719,7 +942,23 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                             </Badge>
                           </div>
                           {question.type === "text" ? (
-                            <div className="mt-3 text-sm"><p className="text-xs text-muted-foreground">Candidate answer</p><p className="mt-1 whitespace-pre-wrap font-medium">{answer || "No answer"}</p></div>
+                            <div className="mt-3 grid gap-3 text-sm lg:grid-cols-[1fr_160px]">
+                              <div>
+                                <p className="text-xs text-muted-foreground">Candidate answer</p>
+                                <p className="mt-1 whitespace-pre-wrap font-medium">{answer || "No answer"}</p>
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`${question.id}-score`}>Marks out of 10</Label>
+                                <Input
+                                  id={`${question.id}-score`}
+                                  type="number"
+                                  min={0}
+                                  max={10}
+                                  value={selectedSubmission.textScores?.[question.id] ?? 0}
+                                  onChange={(event) => updateTextScore(question.id, event.target.value)}
+                                />
+                              </div>
+                            </div>
                           ) : (
                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
                               {question.options.map((option) => {
@@ -730,7 +969,7 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                                   : selected
                                     ? "border-red-500/40 bg-red-500/15 text-red-800 dark:text-red-300"
                                     : correct
-                                      ? "border-emerald-500/35 text-emerald-700 dark:text-emerald-400"
+                                      ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                                       : "border-border bg-background text-muted-foreground";
                                 return <div key={option} className={`rounded-md border p-3 text-sm ${optionTone}`}><span className="font-medium">{option}</span><span className="ml-2 text-xs">{selected && correct ? "Selected - correct" : selected ? "Selected - incorrect" : correct ? "Correct answer" : "Not selected"}</span></div>;
                               })}

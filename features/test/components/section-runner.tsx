@@ -14,9 +14,11 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock3,
+  Headphones,
   Send,
   ShieldAlert,
   TriangleAlert,
+  Volume2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,6 +87,21 @@ function formatTimeLeft(totalSeconds: number) {
   const seconds = totalSeconds % 60;
 
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function readStoredDeadline(key: string) {
+  const storedValue =
+    window.localStorage.getItem(key) ?? window.sessionStorage.getItem(key);
+  const parsedValue = storedValue ? Number(storedValue) : 0;
+
+  return Number.isFinite(parsedValue) && parsedValue > Date.now()
+    ? parsedValue
+    : null;
+}
+
+function writeStoredDeadline(key: string, value: number) {
+  window.localStorage.setItem(key, String(value));
+  window.sessionStorage.setItem(key, String(value));
 }
 
 function subscribeToAnswers(onStoreChange: () => void) {
@@ -156,6 +173,9 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   const questionRemainingStorageKey = `${questionTimerStorageKey}-remaining`;
   const [questionTimeLeftSeconds, setQuestionTimeLeftSeconds] =
     useState(questionDurationSeconds);
+  const [speechStatus, setSpeechStatus] = useState<
+    "idle" | "reading" | "unsupported"
+  >("idle");
   const questionIds = section.questions.map((question) => question.id);
   const answeredCount = getAnsweredCount(answers, questionIds);
   const sectionProgress = Math.round(
@@ -299,14 +319,12 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   }, [section.slug]);
 
   useEffect(() => {
-    const storedEndAt = window.sessionStorage.getItem(timerStorageKey);
-    const endAt = storedEndAt
-      ? Number(storedEndAt)
-      : Date.now() + sectionDurationSeconds * 1000;
+    const storedEndAt = readStoredDeadline(timerStorageKey);
+    const endAt = storedEndAt ?? Date.now() + sectionDurationSeconds * 1000;
     timerEndAtRef.current = endAt;
 
     if (!storedEndAt) {
-      window.sessionStorage.setItem(timerStorageKey, String(endAt));
+      writeStoredDeadline(timerStorageKey, endAt);
     }
 
     function updateTimer() {
@@ -325,19 +343,20 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   }, [sectionDurationSeconds, timerStorageKey]);
 
   useEffect(() => {
-    const storedEndAt = window.sessionStorage.getItem(questionTimerStorageKey);
-    const storedRemaining = window.sessionStorage.getItem(questionRemainingStorageKey);
+    const storedEndAt = readStoredDeadline(questionTimerStorageKey);
+    const storedRemaining =
+      window.localStorage.getItem(questionRemainingStorageKey) ??
+      window.sessionStorage.getItem(questionRemainingStorageKey);
     const remainingSeconds = storedRemaining
       ? Math.max(0, Number(storedRemaining))
       : questionDurationSeconds;
-    const endAt = storedEndAt
-      ? Number(storedEndAt)
-      : Date.now() + remainingSeconds * 1000;
+    const endAt = storedEndAt ?? Date.now() + remainingSeconds * 1000;
     questionTimerEndAtRef.current = endAt;
 
     if (!storedEndAt) {
-      window.sessionStorage.setItem(questionTimerStorageKey, String(endAt));
+      writeStoredDeadline(questionTimerStorageKey, endAt);
       window.sessionStorage.removeItem(questionRemainingStorageKey);
+      window.localStorage.removeItem(questionRemainingStorageKey);
     }
 
     function updateQuestionTimer() {
@@ -364,7 +383,9 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   function pauseCurrentQuestionTimer() {
     const remaining = questionTimeLeftSeconds;
     window.sessionStorage.setItem(questionRemainingStorageKey, String(remaining));
+    window.localStorage.setItem(questionRemainingStorageKey, String(remaining));
     window.sessionStorage.removeItem(questionTimerStorageKey);
+    window.localStorage.removeItem(questionTimerStorageKey);
     questionTimerEndAtRef.current = null;
   }
 
@@ -395,7 +416,9 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
         return next;
       });
       window.sessionStorage.setItem(questionRemainingStorageKey, "0");
+      window.localStorage.setItem(questionRemainingStorageKey, "0");
       window.sessionStorage.removeItem(questionTimerStorageKey);
+      window.localStorage.removeItem(questionTimerStorageKey);
       if (!isLastQuestion) {
         setCurrentIndex((index) => index + 1);
       }
@@ -473,8 +496,22 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     const nextEndAt = Date.now() + sectionDurationSeconds * 1000;
 
     timerEndAtRef.current = nextEndAt;
-    window.sessionStorage.setItem(timerStorageKey, String(nextEndAt));
+    writeStoredDeadline(timerStorageKey, nextEndAt);
     setTimeLeftSeconds(sectionDurationSeconds);
+  }
+
+  function readQuestionAloud() {
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+      setSpeechStatus("unsupported");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(currentQuestion.prompt);
+    utterance.onend = () => setSpeechStatus("idle");
+    utterance.onerror = () => setSpeechStatus("idle");
+    setSpeechStatus("reading");
+    window.speechSynthesis.speak(utterance);
   }
 
   async function continueAssessment() {
@@ -645,7 +682,9 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                   All sections
                 </Link>
               </Button>
-              <Badge variant="outline">{activeAssessment.role}</Badge>
+              <Badge variant="outline">
+                {activeAssessment?.role ?? "Assessment"}
+              </Badge>
             </div>
 
             <Card>
@@ -653,9 +692,31 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                 <CardDescription>
                   {section.title} - Question {currentIndex + 1}
                 </CardDescription>
-                <CardTitle className="text-2xl leading-8">
-                  {currentQuestion.prompt}
-                </CardTitle>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <CardTitle className="text-2xl leading-8">
+                    {currentQuestion.prompt}
+                  </CardTitle>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 gap-2"
+                    onClick={readQuestionAloud}
+                    title="Read question aloud"
+                  >
+                    {speechStatus === "reading" ? (
+                      <Headphones className="size-4" />
+                    ) : (
+                      <Volume2 className="size-4" />
+                    )}
+                    {speechStatus === "reading" ? "Reading" : "Read"}
+                  </Button>
+                </div>
+                {speechStatus === "unsupported" ? (
+                  <p className="text-sm text-muted-foreground">
+                    Text-to-speech is not supported by this browser.
+                  </p>
+                ) : null}
               </CardHeader>
               <CardContent className="space-y-6">
                 {currentQuestion.type === "text" ? (

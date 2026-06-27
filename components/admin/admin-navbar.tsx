@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Send,
   Settings,
   ShieldCheck,
   UserCircle,
@@ -31,7 +32,7 @@ const navItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { label: "Assessments", href: "/admin/assessments", icon: ClipboardList },
   { label: "Jobs", href: "/admin/jobs", icon: BriefcaseBusiness },
-  { label: "Settings", href: "/admin/settings", icon: Settings },
+  { label: "Submissions", href: "/admin/submissions", icon: Send },
 ];
 
 function isActive(pathname: string, href: string) {

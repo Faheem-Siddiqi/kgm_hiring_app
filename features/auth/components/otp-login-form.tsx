@@ -20,7 +20,18 @@ import { authenticateCandidate } from "@/features/test/admin-storage";
 
 export function OtpLoginForm() {
   const router = useRouter();
-  const [otp, setOtp] = useState("");
+  const [otp, setOtp] = useState(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+
+    const inviteOtp = new URLSearchParams(window.location.search)
+      .get("otp")
+      ?.replace(/\D/g, "")
+      .slice(0, 6);
+
+    return inviteOtp?.length === 6 ? inviteOtp : "";
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {

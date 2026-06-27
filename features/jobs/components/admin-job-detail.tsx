@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, ClipboardList, Save, Send, Users, type LucideIcon } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ClipboardList, Copy, Loader2, Save, Send, Users, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
   createCandidate,
   readAdminDataSnapshot,
   subscribeToAdminData,
+  updateCandidateInviteEmailStatus,
   upsertJobAssessment,
   type AssessmentResult,
   type Candidate,
@@ -28,6 +29,11 @@ import {
 type AdminSnapshot = {
   candidates?: Candidate[];
   results?: AssessmentResult[];
+};
+
+type CandidateInviteResponse = {
+  message?: string;
+  mail?: { sent?: boolean; reason?: string | null };
 };
 
 function useAdminData() {
@@ -87,6 +93,7 @@ export function AdminJobDetail({
   const [candidateEmail, setCandidateEmail] = useState("");
   const [inviteAssessmentId, setInviteAssessmentId] = useState(job.assessmentIds[0] ?? "");
   const [saving, setSaving] = useState(false);
+  const [sendingInvite, setSendingInvite] = useState(false);
   const { candidates, results } = useAdminData();
   const jobCandidates = useMemo(
     () => candidates.filter((candidate) => job.assessmentIds.includes(candidate.jobId)),
@@ -105,6 +112,20 @@ export function AdminJobDetail({
     { label: "Assessments", value: job.assessments.length, icon: ClipboardList },
     { label: "Status", value: job.status, icon: ClipboardList },
   ];
+
+  function buildCandidateLink(candidate: Candidate) {
+    const origin = typeof window === "undefined" ? "" : window.location.origin;
+    return `${origin}/?otp=${candidate.otpCode}`;
+  }
+
+  async function copyText(value: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(successMessage);
+    } catch {
+      toast.error("Copy failed. Select the text and copy it manually.");
+    }
+  }
 
   async function saveJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -138,7 +159,7 @@ export function AdminJobDetail({
     toast.success("Job updated.");
   }
 
-  function sendInvite(event: FormEvent<HTMLFormElement>) {
+  async function sendInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const assessment = job.assessments.find((item) => item.id === inviteAssessmentId);
     if (!candidateName.trim() || !candidateEmail.trim() || !assessment) {
@@ -148,9 +169,48 @@ export function AdminJobDetail({
 
     upsertJobAssessment(runtimeAssessmentFromJob(job, assessment));
     const candidate = createCandidate(candidateName.trim(), candidateEmail.trim(), assessment.id);
+    setSendingInvite(true);
+    let response: Response;
+    let payload: CandidateInviteResponse;
+
+    try {
+      response = await fetch("/api/admin/candidate-invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateName: candidate.name,
+          candidateEmail: candidate.email,
+          assessmentTitle: `${job.title} - ${assessment.name}`,
+          otpCode: candidate.otpCode,
+          inviteUrl: buildCandidateLink(candidate),
+        }),
+      });
+      payload = (await response.json()) as CandidateInviteResponse;
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "Could not reach the mail service.";
+      setSendingInvite(false);
+      updateCandidateInviteEmailStatus(candidate.id, "failed", reason);
+      toast.error("Email failed. Manual OTP is now available in the candidates table.");
+      return;
+    }
+
+    setSendingInvite(false);
+
+    if (!response.ok || !payload.mail?.sent) {
+      updateCandidateInviteEmailStatus(
+        candidate.id,
+        "failed",
+        payload.mail?.reason ?? payload.message ?? "Email could not be sent.",
+      );
+      toast.error("Email failed. Manual OTP is now available in the candidates table.");
+      return;
+    }
+
+    updateCandidateInviteEmailStatus(candidate.id, "sent");
     setCandidateName("");
     setCandidateEmail("");
-    toast.success(`Invite prepared for ${candidate.email}.`);
+    toast.success(`Invite email sent to ${candidate.email}.`);
   }
 
   return (
@@ -291,9 +351,9 @@ export function AdminJobDetail({
                       <Input id="candidate-email" type="email" value={candidateEmail} onChange={(event) => setCandidateEmail(event.target.value)} />
                     </div>
                   </div>
-                  <Button type="submit" className="w-full" disabled={!job.assessments.length}>
-                    <Send className="size-4" />
-                    Send invite
+                  <Button type="submit" className="w-full" disabled={!job.assessments.length || sendingInvite}>
+                    {sendingInvite ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                    {sendingInvite ? "Sending invite" : "Send invite"}
                   </Button>
                 </form>
               </CardContent>
@@ -328,6 +388,7 @@ export function AdminJobDetail({
             {jobCandidates.map((candidate) => {
               const result = jobResults.find((item) => item.candidateEmail === candidate.email && item.assessmentId === candidate.jobId);
               const assessment = job.assessments.find((item) => item.id === candidate.jobId);
+              const emailFailed = candidate.inviteEmailStatus === "failed";
               return (
                 <div key={candidate.id} className="rounded-md border p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -335,11 +396,41 @@ export function AdminJobDetail({
                       <p className="font-medium">{candidate.name}</p>
                       <p className="text-sm text-muted-foreground">{candidate.email}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {assessment?.code ?? "Assessment"} · OTP {candidate.otpCode} · {formatDate(candidate.invitedAt)}
+                        {assessment?.code ?? "Assessment"} · invite {candidate.inviteEmailStatus ?? "sent"} · {formatDate(candidate.invitedAt)}
                       </p>
+                      {emailFailed ? (
+                        <div className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 p-3">
+                          <p className="text-xs font-medium text-destructive">
+                            Email failed. Share this OTP manually.
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {candidate.inviteEmailFailure}
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void copyText(candidate.otpCode, "OTP copied")}
+                            >
+                              <Copy className="size-4" />
+                              Copy OTP {candidate.otpCode}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void copyText(buildCandidateLink(candidate), "Candidate assessment link copied")}
+                            >
+                              <Copy className="size-4" />
+                              Copy invite link
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                     <Button asChild variant={result ? "default" : "outline"} size="sm">
-                      <Link href={`/admin/assessment/${candidate.jobId}${result ? `?submission=${result.id}` : ""}`}>
+                      <Link href={result ? `/admin/submissions/${result.id}` : `/admin/assessment/${candidate.jobId}`}>
                         {result ? `Open submission (${result.score}%)` : "Send / waiting"}
                       </Link>
                     </Button>

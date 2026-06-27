@@ -131,7 +131,7 @@ function buildAdminNotifications(
       description: `${result.assessmentTitle} scored ${result.score}%`,
       time: formatDate(result.submittedAt),
       tone: result.status === "Auto submitted" ? "warning" : "success",
-      href: `/admin/assessment/${result.assessmentId}?submission=${result.id}`,
+      href: `/admin/submissions/${result.id}`,
     }),
   );
   const pendingInvites = candidates.filter(

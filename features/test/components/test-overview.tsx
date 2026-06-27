@@ -84,6 +84,26 @@ export function TestOverview() {
   );
   const overallProgress = Math.round((answeredQuestions / totalQuestions) * 100);
 
+  if (!activeAssessment) {
+    return (
+      <section className="mx-auto w-full max-w-3xl px-4 py-16">
+        <Card>
+          <CardHeader>
+            <CardTitle>No assessment assigned</CardTitle>
+            <CardDescription>
+              Enter a valid candidate invitation OTP before opening the assessment.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link href="/">Go to candidate portal</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </section>
+    );
+  }
+
   return (
     <>
       {isOpeningSection ? (
