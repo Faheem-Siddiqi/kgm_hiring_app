@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useState } from "react";
-import { ArrowLeft, BriefcaseBusiness, KeyRound, LockKeyhole, ShieldCheck, UserRoundCog } from "lucide-react";
+import { BriefcaseBusiness, KeyRound, LockKeyhole, ShieldCheck, UserRoundCog } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -35,7 +35,7 @@ export function AdminLoginForm() {
       return;
     }
 
-    toast.success("Welcome to the hiring workspace.");
+    toast.success("Authenticated. Welcome to KGM Hiring Workplace");
     router.replace("/admin");
     router.refresh();
   }
@@ -71,8 +71,8 @@ export function AdminLoginForm() {
           </div>
           <Button asChild variant="outline" className="w-fit">
             <Link href="/jobs">
-              <ArrowLeft className="size-4" />
-              Back to jobs
+              <BriefcaseBusiness className="size-4" />
+              Browse open jobs
             </Link>
           </Button>
         </div>

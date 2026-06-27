@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, BriefcaseBusiness, LockKeyhole, ShieldAlert } from "lucide-react";
+import { BriefcaseBusiness, LockKeyhole, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,8 +46,8 @@ export default async function AdminAuthRequiredPage({
               </Button>
               <Button asChild variant="outline">
                 <Link href="/jobs">
-                  <ArrowLeft className="size-4" />
-                  Back to jobs
+                  <BriefcaseBusiness className="size-4" />
+                  Browse open jobs
                 </Link>
               </Button>
             </div>
