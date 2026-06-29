@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -24,25 +24,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
-  readAdminDataSnapshot,
-  subscribeToAdminData,
+  fetchAdminDataSnapshot,
   type AssessmentResult,
 } from "@/features/test/admin-storage";
-
-type AdminSnapshot = {
-  results?: AssessmentResult[];
-};
-
-function useSubmissions() {
-  const snapshot = useSyncExternalStore(
-    subscribeToAdminData,
-    readAdminDataSnapshot,
-    () => "{}",
-  );
-  const adminData = JSON.parse(snapshot) as AdminSnapshot;
-
-  return adminData.results ?? [];
-}
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -95,9 +79,31 @@ function buildShareBody(submission: AssessmentResult) {
 }
 
 export function AdminSubmissions() {
-  const submissions = useSubmissions();
+  const [submissions, setSubmissions] = useState<AssessmentResult[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [shareEmails, setShareEmails] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSubmissions() {
+      try {
+        const data = await fetchAdminDataSnapshot();
+        if (active) setSubmissions(data.results);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not load submissions.");
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    }
+
+    void loadSubmissions();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredSubmissions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -289,7 +295,13 @@ export function AdminSubmissions() {
               );
             })}
 
-            {!filteredSubmissions.length ? (
+            {isLoading ? (
+              <div className="rounded-md border border-dashed p-10 text-center text-sm text-muted-foreground">
+                Loading submissions...
+              </div>
+            ) : null}
+
+            {!isLoading && !filteredSubmissions.length ? (
               <div className="rounded-md border border-dashed p-10 text-center text-sm text-muted-foreground">
                 No submissions found.
               </div>

@@ -1,7 +1,5 @@
 "use client";
-
-import Link from "next/link";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -10,7 +8,9 @@ import {
   Send,
   ShieldAlert,
 } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
+
 import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,16 +25,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  buildAssessmentSectionsFromResource,
-  type SectionQuestionTypeConfig,
-} from "@/features/test/assessment-resources";
-import {
-  readAdminDataSnapshot,
-  subscribeToAdminData,
-  updateAssessmentReview,
   type AssessmentResult,
   type JobAssessment,
 } from "@/features/test/admin-storage";
+import {
+  buildAssessmentSectionsFromResource,
+  type SectionQuestionTypeConfig,
+} from "@/features/test/assessment-resources";
+import type { PublicAssessment } from "@/lib/assessment-types";
 
 type AdminSnapshot = {
   jobs?: JobAssessment[];
@@ -51,12 +49,93 @@ type SubmissionEmailResponse = {
 const roman = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
 
 function useAdminData() {
-  const snapshot = useSyncExternalStore(
-    subscribeToAdminData,
-    readAdminDataSnapshot,
-    () => "{}",
-  );
-  const data = JSON.parse(snapshot) as AdminSnapshot;
+  const [data, setData] = useState<AdminSnapshot>({});
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadData() {
+      try {
+        const [recordsResponse, assessmentsResponse] = await Promise.all([
+          fetch("/api/admin/hiring-records", { cache: "no-store" }),
+          fetch("/api/admin/assessments", { cache: "no-store" }),
+        ]);
+        const records = (await recordsResponse.json()) as {
+          message?: string;
+          results?: AssessmentResult[];
+        };
+        const assessmentData = (await assessmentsResponse.json()) as {
+          message?: string;
+          assessments?: PublicAssessment[];
+        };
+
+        if (!recordsResponse.ok) {
+          throw new Error(records.message ?? "Could not load submissions.");
+        }
+
+        if (!assessmentsResponse.ok) {
+          throw new Error(assessmentData.message ?? "Could not load assessments.");
+        }
+
+        if (!active) return;
+
+        setData({
+          results: records.results ?? [],
+          jobs: (assessmentData.assessments ?? []).map((assessment) => {
+            const sectionTypeConfigs = Object.fromEntries(
+              assessment.sectionSettings.map((section) => [
+                section.sectionId,
+                section.types,
+              ]),
+            ) as Record<string, SectionQuestionTypeConfig>;
+            const questionsPerSection = Math.max(
+              1,
+              ...assessment.sectionSettings.map(
+                (section) =>
+                  section.types.mcq.quantity +
+                  section.types.multi.quantity +
+                  section.types.text.quantity,
+              ),
+            );
+            const timePerSectionMinutes = Math.max(
+              1,
+              ...assessment.sectionSettings.map((section) =>
+                Math.ceil(
+                  Math.max(
+                    section.types.mcq.timeLimitSeconds,
+                    section.types.multi.timeLimitSeconds,
+                    section.types.text.timeLimitSeconds,
+                  ) / 60,
+                ),
+              ),
+            );
+
+            return {
+              id: assessment.id,
+              title: assessment.name,
+              role: assessment.questionBankName,
+              createdAt: assessment.createdAt,
+              resourceId: assessment.questionBankId,
+              sectionCount: assessment.sectionCount,
+              timePerSectionMinutes,
+              questionsPerTest: assessment.totalQuestions,
+              questionsPerSection,
+              dummyQuestionsPerSection: 0,
+              sectionTypeConfigs,
+            };
+          }),
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not load submission.");
+      }
+    }
+
+    void loadData();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return {
     jobs: data.jobs ?? [],
@@ -119,7 +198,10 @@ function buildEmailBody({
 
 export function AdminSubmissionDetail({ submissionId }: { submissionId: string }) {
   const { jobs, results } = useAdminData();
-  const submission = results.find((result) => result.id === submissionId);
+  const [submissionOverride, setSubmissionOverride] = useState<AssessmentResult | null>(null);
+  const storedSubmission = results.find((result) => result.id === submissionId);
+  const submission =
+    submissionOverride?.id === submissionId ? submissionOverride : storedSubmission;
   const job = submission
     ? jobs.find((item) => item.id === submission.assessmentId)
     : undefined;
@@ -175,16 +257,52 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
     (question) => submissionRecord.textScores?.[question.id] === undefined,
   ).length;
 
+  async function saveReview(
+    action: SubmissionAction | "evaluated",
+    updates: { textScores?: Record<string, number> } = {},
+  ) {
+    setSendingAction(action);
+    try {
+      const response = await fetch(`/api/admin/submissions/${submissionRecord.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          remark,
+          textScores: updates.textScores,
+        }),
+      });
+      const payload = (await response.json()) as {
+        message?: string;
+        submission?: AssessmentResult;
+      };
+
+      if (!response.ok || !payload.submission) {
+        throw new Error(payload.message ?? "Review could not be saved.");
+      }
+
+      setSubmissionOverride(payload.submission);
+      toast.success(action === "evaluated" ? "Review saved." : "Review action saved.");
+      return payload.submission;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Review could not be saved.");
+      return null;
+    } finally {
+      setSendingAction(null);
+    }
+  }
+
   function saveRemarkOnly() {
-    updateAssessmentReview(submissionRecord.id, { adminRemark: remark });
-    toast.success("Admin remark saved.");
+    void saveReview("evaluated");
   }
 
   function updateTextScore(questionId: string, value: string) {
     const score = Math.min(10, Math.max(0, Number(value)));
-    updateAssessmentReview(submissionRecord.id, {
-      textScores: { [questionId]: Number.isFinite(score) ? score : 0 },
-      adminRemark: remark,
+    void saveReview("evaluated", {
+      textScores: {
+        ...(submissionRecord.textScores ?? {}),
+        [questionId]: Number.isFinite(score) ? score : 0,
+      },
     });
   }
 
@@ -198,10 +316,8 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
     subject: string;
   }) {
     setSendingAction(action);
-    updateAssessmentReview(submissionRecord.id, {
-      decision: action,
-      adminRemark: remark,
-    });
+    const reviewedSubmission = await saveReview(action);
+    if (!reviewedSubmission) return;
 
     try {
       const response = await fetch("/api/admin/submission-emails", {
@@ -210,7 +326,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
         body: JSON.stringify({
           to,
           subject,
-          body: buildEmailBody({ submission: submissionRecord, remark, action }),
+          body: buildEmailBody({ submission: reviewedSubmission, remark, action }),
         }),
       });
       const payload = (await response.json()) as SubmissionEmailResponse;
@@ -229,12 +345,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
   }
 
   function markEvaluated() {
-    setSendingAction("evaluated");
-    window.setTimeout(() => {
-      updateAssessmentReview(submissionRecord.id, { adminRemark: remark });
-      setSendingAction(null);
-      toast.success("Submission marked as evaluated.");
-    }, 500);
+    void saveReview("evaluated");
   }
 
   function sendAcceptanceEmail() {
@@ -272,7 +383,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
       <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <Button asChild variant="outline" className="mb-4">
+            <Button asChild variant="outline" className="mb-6">
               <Link href="/admin/submissions">
                 <ArrowLeft className="size-4" />
                 Back to submissions
@@ -288,6 +399,19 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
               {submission.assessmentTitle} · submitted {formatDate(submission.submittedAt)}
             </p>
+            {submission.evaluatedBy ? (
+              <div className="mt-4 rounded-md border p-4 text-sm">
+                <p className="font-medium">
+                  Evaluated by {submission.evaluatedBy.name}
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  {submission.evaluatedBy.email}
+                </p>
+                {submission.evaluatedBy.remark ? (
+                  <p className="mt-3 leading-6">{submission.evaluatedBy.remark}</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge variant="outline">{submission.score}% score</Badge>
@@ -327,7 +451,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                         className={[
                           "rounded-md border p-3 text-left transition",
                           isActive
-                            ? "border-foreground bg-muted/50"
+                            ? "border-primary bg-primary text-primary-foreground shadow-sm"
                             : "bg-background hover:bg-muted/40",
                         ].join(" ")}
                         onClick={() => setActiveSectionSlug(section.slug)}
@@ -340,7 +464,14 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                             {textToReview}
                           </Badge>
                         </div>
-                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                        <p
+                          className={[
+                            "mt-1 line-clamp-2 text-xs",
+                            isActive
+                              ? "text-primary-foreground/85"
+                              : "text-muted-foreground",
+                          ].join(" ")}
+                        >
                           {section.title}
                         </p>
                       </button>
@@ -350,7 +481,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
 
                 {activeSection ? (
                   <div className="space-y-4">
-                    <div className="rounded-md border bg-muted/25 p-4">
+                    <div className="rounded-md border p-4">
                       <p className="text-sm font-medium">
                         {activeSection.title}
                       </p>
@@ -370,15 +501,8 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                         expected.length > 0 &&
                         expected.length === provided.length &&
                         expected.every((value, answerIndex) => value === provided[answerIndex]);
-                      const tone =
-                        question.type === "text"
-                          ? "border-border bg-background"
-                          : isCorrect
-                            ? "border-emerald-500/35 bg-emerald-500/10"
-                            : "border-red-500/35 bg-red-500/10";
-
                       return (
-                        <div key={question.id} className={`rounded-lg border p-4 ${tone}`}>
+                        <div key={question.id} className="rounded-lg border p-4">
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div>
                               <p className="text-xs text-muted-foreground">
@@ -399,7 +523,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
 
                           {question.type === "text" ? (
                             <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_180px]">
-                              <div className="rounded-md border bg-muted/20 p-3">
+                              <div className="rounded-md border p-3">
                                 <p className="text-xs text-muted-foreground">Candidate answer</p>
                                 <p className="mt-2 whitespace-pre-wrap text-sm font-medium">
                                   {answer || "No answer"}

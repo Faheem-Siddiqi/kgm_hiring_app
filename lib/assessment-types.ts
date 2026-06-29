@@ -27,6 +27,7 @@ export type PublicAssessment = {
     title: string;
     slug: string;
     department: string;
+    location: string;
     status: string;
   }>;
   createdAt: string;

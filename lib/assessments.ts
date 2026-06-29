@@ -62,6 +62,7 @@ function toPublicAssessment(
     title: job.title,
     slug: job.slug,
     department: job.department,
+    location: job.location,
     status: job.status,
   }));
   const totalQuestions = assessment.sectionSettings.reduce(
@@ -169,6 +170,14 @@ function parseTimeSeconds(value: unknown, label: string) {
   return rounded;
 }
 
+function parseTypeTimeSeconds(quantity: number, value: unknown, label: string) {
+  if (quantity === 0) {
+    return 0;
+  }
+
+  return parseTimeSeconds(value, label);
+}
+
 function sanitizeSectionSettings(
   questionBank: AssessmentResourceSummary,
   rawSettings: unknown,
@@ -221,7 +230,8 @@ function sanitizeSectionSettings(
           `${sourceSection.title} ${type.toUpperCase()} quantity`,
           sourceCount,
         );
-        const timeLimitSeconds = parseTimeSeconds(
+        const timeLimitSeconds = parseTypeTimeSeconds(
+          quantity,
           typeInput.timeLimitSeconds ?? DEFAULT_TYPE_SECONDS[type],
           `${sourceSection.title} ${type.toUpperCase()} time`,
         );
@@ -233,6 +243,15 @@ function sanitizeSectionSettings(
       },
       {} as Record<AssessmentQuestionType, AssessmentTypeSetting>,
     );
+    const sectionQuestionTotal =
+      types.mcq.quantity + types.multi.quantity + types.text.quantity;
+
+    if (!sectionQuestionTotal) {
+      throw new AssessmentError(
+        `${sourceSection.title} must include at least one question type.`,
+        400,
+      );
+    }
 
     return {
       sectionId,

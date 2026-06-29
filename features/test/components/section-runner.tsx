@@ -20,6 +20,7 @@ import {
   TriangleAlert,
   Volume2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -207,13 +208,17 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     answersRef.current = answers;
   }, [answers]);
 
-  function submitAssessment(status: "Submitted" | "Auto submitted") {
-    saveAssessmentResult({
-      answers: answersRef.current,
-      status,
-    });
-    setSubmissionStatus(status);
-    setShowCompletionDialog(true);
+  async function submitAssessment(status: "Submitted" | "Auto submitted") {
+    try {
+      await saveAssessmentResult({
+        answers: answersRef.current,
+        status,
+      });
+      setSubmissionStatus(status);
+      setShowCompletionDialog(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Submission could not be saved.");
+    }
   }
 
   useEffect(() => {
@@ -245,7 +250,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
         isStoppingAssessmentRef.current = true;
         setShowWindowWarning(false);
         void exitAssessmentFullscreen();
-        submitAssessment("Auto submitted");
+        void submitAssessment("Auto submitted");
         return;
       }
 
@@ -498,6 +503,11 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     timerEndAtRef.current = nextEndAt;
     writeStoredDeadline(timerStorageKey, nextEndAt);
     setTimeLeftSeconds(sectionDurationSeconds);
+  }
+
+  function finishSubmittedAssessment() {
+    setShowCompletionDialog(false);
+    router.replace("/");
   }
 
   function readQuestionAloud() {
@@ -838,7 +848,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                         </Button>
                       )
                     ) : (
-                      <Button disabled={!hasCurrentAnswer} onClick={() => submitAssessment("Submitted")}>
+                      <Button disabled={!hasCurrentAnswer} onClick={() => void submitAssessment("Submitted")}>
                         Submit Test
                         <Send className="size-4" />
                       </Button>
@@ -930,7 +940,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             <DialogDescription>
               {submissionStatus === "Auto submitted"
                 ? "The assessment was submitted automatically after 3 fullscreen violations."
-                : "Your assessment preview is complete. Saved answers remain on this device until the backend submission endpoint is connected."}
+                : "Thanks for submitting your assessment. Your access code has now been closed."}
             </DialogDescription>
           </DialogHeader>
           {submissionStatus === "Auto submitted" ? (
@@ -944,12 +954,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             have saved answers.
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCompletionDialog(false)}>
-              Review answers
-            </Button>
-            <Button onClick={() => router.replace("/test")}>
-              Back to overview
-            </Button>
+            <Button onClick={finishSubmittedAssessment}>OK</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

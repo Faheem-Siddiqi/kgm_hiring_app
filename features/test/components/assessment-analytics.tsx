@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -33,12 +33,10 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  createCandidate,
-  readAdminDataSnapshot,
-  subscribeToAdminData,
+  createCandidateRecord,
+  fetchAdminDataSnapshot,
   saveSectionQuestionTypeConfigs,
-  updateAssessmentReview,
-  updateCandidateInviteEmailStatus,
+  updateCandidateInviteEmailStatusRecord,
   type AssessmentResult,
   type Candidate,
   type JobAssessment,
@@ -48,11 +46,13 @@ import {
   buildAssessmentSectionsFromResource,
   type SectionQuestionTypeConfig,
 } from "@/features/test/assessment-resources";
+import type { PublicAssessment } from "@/lib/assessment-types";
 
 type AdminSnapshot = {
   candidates?: Candidate[];
   jobs?: JobAssessment[];
   results?: AssessmentResult[];
+  canViewCandidateOtp?: boolean;
 };
 
 type CandidateInviteResponse = {
@@ -61,17 +61,92 @@ type CandidateInviteResponse = {
 };
 
 function useAdminData() {
-  const snapshot = useSyncExternalStore(
-    subscribeToAdminData,
-    readAdminDataSnapshot,
-    () => "{}",
-  );
-  const adminData = JSON.parse(snapshot) as AdminSnapshot;
+  const [adminData, setAdminData] = useState<AdminSnapshot>({});
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadData() {
+      try {
+        const [records, assessmentsResponse] = await Promise.all([
+          fetchAdminDataSnapshot(),
+          fetch("/api/admin/assessments", { cache: "no-store" }),
+        ]);
+        const assessmentsPayload = (await assessmentsResponse.json()) as {
+          message?: string;
+          assessments?: PublicAssessment[];
+        };
+
+        if (!assessmentsResponse.ok) {
+          throw new Error(assessmentsPayload.message ?? "Could not load assessments.");
+        }
+
+        if (!active) return;
+
+        setAdminData({
+          candidates: records.candidates,
+          results: records.results,
+          jobs: (assessmentsPayload.assessments ?? []).map((assessment) => {
+            const sectionTypeConfigs = Object.fromEntries(
+              assessment.sectionSettings.map((section) => [
+                section.sectionId,
+                section.types,
+              ]),
+            ) as Record<string, SectionQuestionTypeConfig>;
+            const questionsPerSection = Math.max(
+              1,
+              ...assessment.sectionSettings.map(
+                (section) =>
+                  section.types.mcq.quantity +
+                  section.types.multi.quantity +
+                  section.types.text.quantity,
+              ),
+            );
+            const timePerSectionMinutes = Math.max(
+              1,
+              ...assessment.sectionSettings.map((section) =>
+                Math.ceil(
+                  Math.max(
+                    section.types.mcq.timeLimitSeconds,
+                    section.types.multi.timeLimitSeconds,
+                    section.types.text.timeLimitSeconds,
+                  ) / 60,
+                ),
+              ),
+            );
+
+            return {
+              id: assessment.id,
+              title: assessment.name,
+              role: assessment.questionBankName,
+              createdAt: assessment.createdAt,
+              resourceId: assessment.questionBankId,
+              sectionCount: assessment.sectionCount,
+              timePerSectionMinutes,
+              questionsPerTest: assessment.totalQuestions,
+              questionsPerSection,
+              dummyQuestionsPerSection: 0,
+              sectionTypeConfigs,
+            };
+          }),
+        });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not load assessment data.");
+      }
+    }
+
+    void loadData();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return {
     candidates: adminData.candidates ?? [],
     jobs: adminData.jobs ?? [],
     results: adminData.results ?? [],
+    canViewCandidateOtp: adminData.canViewCandidateOtp ?? false,
   };
 }
 
@@ -106,7 +181,7 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const searchParams = useSearchParams();
-  const { candidates, jobs, results } = useAdminData();
+  const { candidates, jobs, results, canViewCandidateOtp } = useAdminData();
   const assessment = jobs.find((job) => job.id === assessmentId);
   const assessmentCandidates = useMemo(
     () => candidates.filter((candidate) => candidate.jobId === assessmentId),
@@ -184,9 +259,18 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
       (resourceSummary?.sections ?? []).map((section) => [
         section.id,
         {
-          mcq: { quantity: Math.min(3, section.counts.mcq), timeLimitSeconds: 60 },
-          multi: { quantity: Math.min(3, section.counts.multi), timeLimitSeconds: 90 },
-          text: { quantity: Math.min(3, section.counts.text), timeLimitSeconds: 180 },
+          mcq: {
+            quantity: Math.min(3, section.counts.mcq),
+            timeLimitSeconds: section.counts.mcq > 0 ? 60 : 0,
+          },
+          multi: {
+            quantity: Math.min(3, section.counts.multi),
+            timeLimitSeconds: section.counts.multi > 0 ? 90 : 0,
+          },
+          text: {
+            quantity: Math.min(3, section.counts.text),
+            timeLimitSeconds: section.counts.text > 0 ? 180 : 0,
+          },
         },
       ]),
     );
@@ -243,30 +327,27 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          candidateName: candidate.name,
-          candidateEmail: candidate.email,
+          candidateId: candidate.id,
           assessmentTitle,
-          otpCode: candidate.otpCode,
-          inviteUrl: buildCandidateLink(candidate),
         }),
       });
       payload = (await response.json()) as CandidateInviteResponse;
     } catch (error) {
       const reason =
         error instanceof Error ? error.message : "Could not reach the mail service.";
-      updateCandidateInviteEmailStatus(candidate.id, "failed", reason);
+      await updateCandidateInviteEmailStatusRecord(candidate.id, "failed", reason);
       toast.error("Email failed. Manual OTP is now available in the candidates table.");
       return false;
     }
 
     if (!response.ok || !payload.mail?.sent) {
       const reason = payload.mail?.reason ?? payload.message ?? "Email could not be sent.";
-      updateCandidateInviteEmailStatus(candidate.id, "failed", reason);
+      await updateCandidateInviteEmailStatusRecord(candidate.id, "failed", reason);
       toast.error("Email failed. Manual OTP is now available in the candidates table.");
       return false;
     }
 
-    updateCandidateInviteEmailStatus(candidate.id, "sent");
+    await updateCandidateInviteEmailStatusRecord(candidate.id, "sent");
     toast.success(`Invite email sent to ${candidate.email}`);
     return true;
   }
@@ -281,7 +362,11 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
       ...current,
       [sectionId]: {
         ...current[sectionId],
-        [type]: { ...current[sectionId][type], [field]: value },
+        [type]: {
+          ...current[sectionId][type],
+          [field]: value,
+          ...(field === "quantity" && value === 0 ? { timeLimitSeconds: 0 } : {}),
+        },
       },
     }));
     setSettingsDirty(true);
@@ -308,14 +393,23 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
       return;
     }
 
-    const candidate = createCandidate(
-      candidateName.trim(),
-      candidateEmail.trim(),
-      assessmentId,
-    );
     setIsSendingInvite(true);
-    const sent = await sendCandidateInvite(candidate, assessment.title);
-    setIsSendingInvite(false);
+    let sent = false;
+    try {
+      const assignment = await createCandidateRecord(
+        candidateName.trim(),
+        candidateEmail.trim(),
+        assessmentId,
+      );
+      if (assignment.existingPending) {
+        toast.info("Candidate already has an active invitation. Reusing the existing assignment.");
+      }
+      sent = await sendCandidateInvite(assignment.candidate, assessment.title);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create candidate.");
+    } finally {
+      setIsSendingInvite(false);
+    }
 
     if (sent) {
       setCandidateName("");
@@ -323,34 +417,72 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
     }
   }
 
+  async function saveSubmissionReview(
+    action: "evaluated" | "accepted" | "rejected" | "forwarded",
+    updates: { textScores?: Record<string, number> } = {},
+  ) {
+    if (!selectedSubmission) return null;
+
+    const response = await fetch(`/api/admin/submissions/${selectedSubmission.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        remark: reviewRemark,
+        textScores: updates.textScores,
+      }),
+    });
+    const payload = (await response.json()) as {
+      message?: string;
+      submission?: AssessmentResult;
+    };
+
+    if (!response.ok || !payload.submission) {
+      throw new Error(payload.message ?? "Review could not be saved.");
+    }
+
+    return payload.submission;
+  }
+
   function updateTextScore(questionId: string, value: string) {
     if (!selectedSubmission) return;
     const score = Math.min(10, Math.max(0, Number(value)));
-    updateAssessmentReview(selectedSubmission.id, {
-      textScores: { [questionId]: Number.isFinite(score) ? score : 0 },
-    });
+    void saveSubmissionReview("evaluated", {
+      textScores: {
+        ...(selectedSubmission.textScores ?? {}),
+        [questionId]: Number.isFinite(score) ? score : 0,
+      },
+    }).catch((error) =>
+      toast.error(error instanceof Error ? error.message : "Review could not be saved."),
+    );
   }
 
   function saveRemark() {
     if (!selectedSubmission) return;
-    updateAssessmentReview(selectedSubmission.id, { adminRemark: reviewRemark });
-    toast.success("Review remark saved");
+    void saveSubmissionReview("evaluated")
+      .then(() => toast.success("Review remark saved"))
+      .catch((error) =>
+        toast.error(error instanceof Error ? error.message : "Review could not be saved."),
+      );
   }
 
   function markEvaluated() {
     if (!selectedSubmission) return;
     setIsEvaluating(true);
-    window.setTimeout(() => {
-      updateAssessmentReview(selectedSubmission.id, { adminRemark: reviewRemark });
-      setIsEvaluating(false);
-      toast.success("Submission marked as evaluated");
-    }, 600);
+    void saveSubmissionReview("evaluated")
+      .then(() => toast.success("Submission marked as evaluated"))
+      .catch((error) =>
+        toast.error(error instanceof Error ? error.message : "Review could not be saved."),
+      )
+      .finally(() => setIsEvaluating(false));
   }
 
   function sendCandidateDecision(decision: "accepted" | "rejected") {
     if (!selectedSubmission) return;
     const assessmentTitle = assessment?.title ?? selectedSubmission.assessmentTitle;
-    updateAssessmentReview(selectedSubmission.id, { decision, adminRemark: reviewRemark });
+    void saveSubmissionReview(decision).catch((error) =>
+      toast.error(error instanceof Error ? error.message : "Review could not be saved."),
+    );
     const subject =
       decision === "accepted"
         ? `KGM assessment update - ${assessmentTitle}`
@@ -368,10 +500,9 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
       return;
     }
 
-    updateAssessmentReview(selectedSubmission.id, {
-      decision: "forwarded",
-      adminRemark: reviewRemark,
-    });
+    void saveSubmissionReview("forwarded").catch((error) =>
+      toast.error(error instanceof Error ? error.message : "Review could not be saved."),
+    );
     const reviewLink = `${window.location.origin}/admin/submissions/${selectedSubmission.id}`;
     const subject = `Candidate review requested - ${selectedSubmission.candidateName}`;
     const body = `Please review this candidate:%0D%0A%0D%0AName: ${selectedSubmission.candidateName}%0D%0AScore: ${selectedSubmission.score}%25%0D%0ALink: ${reviewLink}%0D%0A%0D%0ARemark: ${encodeURIComponent(reviewRemark || "No remark added.")}`;
@@ -584,17 +715,19 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                     ] as const).map(([type, label]) => {
                       const defaults = { mcq: 60, multi: 90, text: 180 };
                       const current = settingsDraft[section.id]?.[type];
+                      const quantity = current?.quantity ?? Math.min(3, section.counts[type]);
+                      const timeDisabled = section.counts[type] <= 0 || quantity === 0;
                       return (
                         <div key={type} className="rounded-md bg-muted/35 p-3">
                           <p className="mb-3 text-sm font-medium">{label}</p>
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-2">
                               <Label htmlFor={`${section.id}-${type}-quantity`}>Quantity</Label>
-                              <Input id={`${section.id}-${type}-quantity`} type="number" min={0} max={section.counts[type]} value={current?.quantity ?? Math.min(3, section.counts[type])} onChange={(event) => updateSettingsDraft(section.id, type, "quantity", Math.min(section.counts[type], Math.max(0, Number(event.target.value))))} />
+                              <Input id={`${section.id}-${type}-quantity`} type="number" min={0} max={section.counts[type]} disabled={section.counts[type] <= 0} value={quantity} onChange={(event) => updateSettingsDraft(section.id, type, "quantity", Math.min(section.counts[type], Math.max(0, Number(event.target.value))))} />
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor={`${section.id}-${type}-time`}>Seconds each</Label>
-                              <Input id={`${section.id}-${type}-time`} type="number" min={10} value={current?.timeLimitSeconds ?? defaults[type]} onChange={(event) => updateSettingsDraft(section.id, type, "timeLimitSeconds", Math.max(10, Number(event.target.value)))} />
+                              <Input id={`${section.id}-${type}-time`} type="number" min={0} disabled={timeDisabled} value={timeDisabled ? 0 : current?.timeLimitSeconds ?? defaults[type]} onChange={(event) => updateSettingsDraft(section.id, type, "timeLimitSeconds", Math.max(1, Number(event.target.value)))} />
                             </div>
                           </div>
                           <p className="mt-2 text-xs text-muted-foreground">{section.counts[type]} available</p>
@@ -639,8 +772,10 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
             </CardHeader>
             <CardContent className="space-y-3">
               {assessmentCandidates.map((candidate) => {
-                const result = assessmentResults.find(
-                  (item) => item.candidateEmail === candidate.email,
+                const result = assessmentResults.find((item) =>
+                  item.candidateId
+                    ? item.candidateId === candidate.id
+                    : item.candidateEmail === candidate.email,
                 );
                 const emailFailed = candidate.inviteEmailStatus === "failed";
 
@@ -700,25 +835,36 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                         <p className="mt-1 text-xs text-muted-foreground">
                           {candidate.inviteEmailFailure}
                         </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          OTP is visible to HOD and IT personnel only.
+                        </p>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void copyText(candidate.otpCode, "OTP copied")}
-                          >
-                            <Copy className="size-4" />
-                            Copy OTP {candidate.otpCode}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void copyText(buildCandidateLink(candidate), "Candidate assessment link copied")}
-                          >
-                            <Copy className="size-4" />
-                            Copy invite link
-                          </Button>
+                          {canViewCandidateOtp ? (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void copyText(candidate.otpCode, "OTP copied")}
+                              >
+                                <Copy className="size-4" />
+                                Copy OTP {candidate.otpCode}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void copyText(buildCandidateLink(candidate), "Candidate assessment link copied")}
+                              >
+                                <Copy className="size-4" />
+                                Copy invite link
+                              </Button>
+                            </>
+                          ) : (
+                            <Badge variant="outline" className="border-destructive/30 bg-background text-destructive">
+                              OTP ******
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     ) : null}

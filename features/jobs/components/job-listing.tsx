@@ -9,7 +9,9 @@ import {
   Clock3,
   MapPin,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
+  UserCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,10 +86,16 @@ export function JobListing({
           </Link>
           <div className="flex items-center gap-2">
             <Button asChild variant="ghost" size="sm">
-              <Link href="/">Candidate portal</Link>
+              <Link href="/">
+                <UserCheck className="size-4" />
+                Candidate portal
+              </Link>
             </Button>
             <Button asChild size="sm">
-              <Link href="/admin/login">Admin</Link>
+              <Link href="/admin/login">
+                <ShieldCheck className="size-4" />
+                Admin
+              </Link>
             </Button>
           </div>
         </div>

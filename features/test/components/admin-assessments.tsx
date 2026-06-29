@@ -62,16 +62,16 @@ function createSectionDraft(questionBank?: AssessmentResourceSummary): SectionDr
       section.id,
       {
         mcq: {
-          quantity: "",
-          timeLimitSeconds: "",
+          quantity: section.counts.mcq > 0 ? "" : 0,
+          timeLimitSeconds: section.counts.mcq > 0 ? "" : 0,
         },
         multi: {
-          quantity: "",
-          timeLimitSeconds: "",
+          quantity: section.counts.multi > 0 ? "" : 0,
+          timeLimitSeconds: section.counts.multi > 0 ? "" : 0,
         },
         text: {
-          quantity: "",
-          timeLimitSeconds: "",
+          quantity: section.counts.text > 0 ? "" : 0,
+          timeLimitSeconds: section.counts.text > 0 ? "" : 0,
         },
       },
     ]),
@@ -98,15 +98,24 @@ function buildSectionSettings(
       types: {
         mcq: {
           quantity: Number(draft[section.id]?.mcq?.quantity ?? 0),
-          timeLimitSeconds: Number(draft[section.id]?.mcq?.timeLimitSeconds ?? 0),
+          timeLimitSeconds:
+            Number(draft[section.id]?.mcq?.quantity ?? 0) === 0
+              ? 0
+              : Number(draft[section.id]?.mcq?.timeLimitSeconds ?? 0),
         },
         multi: {
           quantity: Number(draft[section.id]?.multi?.quantity ?? 0),
-          timeLimitSeconds: Number(draft[section.id]?.multi?.timeLimitSeconds ?? 0),
+          timeLimitSeconds:
+            Number(draft[section.id]?.multi?.quantity ?? 0) === 0
+              ? 0
+              : Number(draft[section.id]?.multi?.timeLimitSeconds ?? 0),
         },
         text: {
           quantity: Number(draft[section.id]?.text?.quantity ?? 0),
-          timeLimitSeconds: Number(draft[section.id]?.text?.timeLimitSeconds ?? 0),
+          timeLimitSeconds:
+            Number(draft[section.id]?.text?.quantity ?? 0) === 0
+              ? 0
+              : Number(draft[section.id]?.text?.timeLimitSeconds ?? 0),
         },
       },
     }));
@@ -218,6 +227,7 @@ export function AdminAssessments({
         [type]: {
           ...current[sectionId]?.[type],
           [field]: value,
+          ...(field === "quantity" && value === 0 ? { timeLimitSeconds: 0 } : {}),
         },
       },
     }));
@@ -232,18 +242,18 @@ export function AdminAssessments({
   }
 
   function isSectionConfigured(section: AssessmentResourceSummary["sections"][number]) {
-    return (["mcq", "multi", "text"] as const).every((type) => {
+    let sectionTotal = 0;
+    const typesConfigured = (["mcq", "multi", "text"] as const).every((type) => {
       if (section.counts[type] <= 0) return true;
       const current = sectionDraft[section.id]?.[type];
-      return Boolean(
-        current &&
-          current.quantity !== "" &&
-          current.timeLimitSeconds !== "" &&
-          current.quantity >= 1 &&
-          current.quantity <= section.counts[type] &&
-          current.timeLimitSeconds >= 1,
-      );
+      if (!current || current.quantity === "") return false;
+      if (current.quantity < 0 || current.quantity > section.counts[type]) return false;
+      sectionTotal += current.quantity;
+      if (current.quantity === 0) return current.timeLimitSeconds === 0;
+      return current.timeLimitSeconds !== "" && current.timeLimitSeconds >= 1;
     });
+
+    return typesConfigured && sectionTotal > 0;
   }
 
   async function handleCreateAssessment(event: FormEvent<HTMLFormElement>) {
@@ -587,7 +597,9 @@ export function AdminAssessments({
                               <div className="mt-3 space-y-3">
                                 {(["mcq", "multi", "text"] as const).map((type) => {
                                   const availableCount = section.counts[type];
+                                  const quantity = sectionDraft[section.id]?.[type]?.quantity ?? "";
                                   const disabled = availableCount <= 0;
+                                  const timeDisabled = disabled || quantity === 0;
 
                                   return (
                                     <div
@@ -600,11 +612,11 @@ export function AdminAssessments({
                                       <div className="space-y-1">
                                         <Input
                                           type="number"
-                                          min={disabled ? 0 : 1}
+                                          min={0}
                                           max={availableCount}
                                           disabled={disabled}
                                           placeholder={`Quantity (max ${availableCount})`}
-                                          value={sectionDraft[section.id]?.[type]?.quantity ?? ""}
+                                          value={quantity}
                                           onChange={(event) =>
                                             updateSectionValue(
                                               section.id,
@@ -612,7 +624,7 @@ export function AdminAssessments({
                                               "quantity",
                                               clampNumber(
                                                 event.target.value,
-                                                disabled ? 0 : 1,
+                                                0,
                                                 availableCount,
                                               ),
                                             )
@@ -622,13 +634,15 @@ export function AdminAssessments({
                                       <div className="space-y-1">
                                         <Input
                                           type="number"
-                                          min={1}
+                                          min={0}
                                           max={3600}
-                                          disabled={disabled}
+                                          disabled={timeDisabled}
                                           placeholder="Time (sec)"
                                           value={
-                                            sectionDraft[section.id]?.[type]?.timeLimitSeconds ??
-                                            ""
+                                            timeDisabled
+                                              ? 0
+                                              : sectionDraft[section.id]?.[type]?.timeLimitSeconds ??
+                                                ""
                                           }
                                           onChange={(event) =>
                                             updateSectionValue(

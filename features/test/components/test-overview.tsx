@@ -10,6 +10,7 @@ import {
   ListChecks,
   Send,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +34,7 @@ import { enterAssessmentFullscreen } from "@/features/test/assessment-fullscreen
 import {
   readActiveAssessmentSections,
   readActiveJobAssessment,
+  saveAssessmentResult,
   subscribeToAdminData,
 } from "@/features/test/admin-storage";
 import {
@@ -83,6 +85,18 @@ export function TestOverview() {
     ),
   );
   const overallProgress = Math.round((answeredQuestions / totalQuestions) * 100);
+
+  async function submitAssessment() {
+    try {
+      await saveAssessmentResult({
+        answers,
+        status: "Submitted",
+      });
+      setShowCompletionDialog(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Submission could not be saved.");
+    }
+  }
 
   if (!activeAssessment) {
     return (
@@ -204,7 +218,7 @@ export function TestOverview() {
               <Button
                 className="w-full sm:w-auto"
                 disabled={answeredQuestions < totalQuestions}
-                onClick={() => setShowCompletionDialog(true)}
+                onClick={() => void submitAssessment()}
               >
                 Submit Test
                 <Send className="size-4" />
@@ -257,7 +271,8 @@ export function TestOverview() {
             </div>
             <DialogTitle>Test submitted</DialogTitle>
             <DialogDescription>
-              Your assessment has been completed and submitted for review.
+              Thanks for submitting your assessment. Your access code has now
+              been closed.
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md border bg-muted/30 p-4 text-sm">
@@ -266,8 +281,8 @@ export function TestOverview() {
             saved answers.
           </div>
           <DialogFooter>
-            <Button onClick={() => setShowCompletionDialog(false)}>
-              Done
+            <Button onClick={() => window.location.assign("/")}>
+              OK
             </Button>
           </DialogFooter>
         </DialogContent>

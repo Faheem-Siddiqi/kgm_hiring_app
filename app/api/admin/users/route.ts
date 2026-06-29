@@ -152,16 +152,18 @@ export const POST = withErrorHandler(async (request: Request) => {
       // temporary password for manual delivery below.
     }
 
+    let adminUser = user;
+
     if (mail.sent) {
       await clearTemporaryPasswordBackup(user.id);
     } else {
-      await saveTemporaryPasswordBackup(user.id, temporaryPassword);
+      adminUser = (await saveTemporaryPasswordBackup(user.id, temporaryPassword)) ?? user;
     }
 
     const canViewFallbackCredentials = canViewTemporaryPasswords(session.user);
     const responseUser = mail.sent || !canViewFallbackCredentials
-      ? user
-      : { ...user, temporaryPasswordBackup: temporaryPassword };
+      ? adminUser
+      : { ...adminUser, temporaryPasswordBackup: temporaryPassword };
 
     return NextResponse.json({
       user: responseUser,

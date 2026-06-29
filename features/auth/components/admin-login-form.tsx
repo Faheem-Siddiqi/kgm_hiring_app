@@ -46,7 +46,7 @@ export function AdminLoginForm() {
         <div className="space-y-5">
           <Badge variant="secondary" className="w-fit gap-2">
             <ShieldCheck className="size-3.5" />
-            Secure admin sign-in
+             Admin sign-in
           </Badge>
           <div className="space-y-3">
             <h1 className="max-w-3xl text-3xl font-semibold tracking-tight sm:text-5xl">

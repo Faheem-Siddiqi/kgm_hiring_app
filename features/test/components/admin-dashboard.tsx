@@ -1,16 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
-  Bell,
   BarChart3,
   BriefcaseBusiness,
   CheckCircle2,
-  Clock,
-  FileText,
-  Mail,
   Users,
   X,
 } from "lucide-react";
@@ -25,13 +21,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
-  readAdminDataSnapshot,
-  subscribeToAdminData,
-  updateJobAssessmentConfig,
+  fetchAdminDataSnapshot,
   type AssessmentResult,
   type Candidate,
   type JobAssessment,
@@ -72,12 +64,28 @@ function formatDate(value: string) {
 }
 
 function useAdminData() {
-  const snapshot = useSyncExternalStore(
-    subscribeToAdminData,
-    readAdminDataSnapshot,
-    () => "{}",
-  );
-  const adminData = JSON.parse(snapshot) as AdminSnapshot;
+  const [adminData, setAdminData] = useState<AdminSnapshot>({});
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadData() {
+      try {
+        const data = await fetchAdminDataSnapshot();
+        if (active) {
+          setAdminData({ candidates: data.candidates, results: data.results });
+        }
+      } catch {
+        if (active) setAdminData({});
+      }
+    }
+
+    void loadData();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return {
     candidates: adminData.candidates ?? [],
@@ -233,7 +241,6 @@ export function AdminDashboard({
         : initialServerAssessments.map(toDashboardAssessment),
     [initialServerAssessments, jobs],
   );
-  const latestResults = useMemo(() => results.slice(0, 4), [results]);
   const notifications = useMemo(
     () => buildAdminNotifications(dashboardJobs, candidates, results).slice(0, 6),
     [dashboardJobs, candidates, results],
@@ -242,9 +249,6 @@ export function AdminDashboard({
     (notification) => !readNotifications.includes(notification.id),
   );
   const averageScore = getAverageScore(results);
-  const completedCount = results.filter(
-    (result) => result.status === "Submitted",
-  ).length;
   const assessmentCount =
     jobs.length || initialServerAssessmentSummary?.total || dashboardJobs.length;
   const publicJobCount = initialPublicJobs.length;
@@ -264,25 +268,6 @@ export function AdminDashboard({
     toast.success("Notifications marked as read");
   }
 
-  function handleConfigChange(
-    job: JobAssessment,
-    field:
-      | "sectionCount"
-      | "timePerSectionMinutes"
-      | "questionsPerTest"
-      | "questionsPerSection",
-    value: string,
-  ) {
-    updateJobAssessmentConfig(job.id, {
-      sectionCount: job.sectionCount,
-      timePerSectionMinutes: job.timePerSectionMinutes,
-      questionsPerTest: job.questionsPerTest,
-      questionsPerSection: job.questionsPerSection,
-      dummyQuestionsPerSection: job.dummyQuestionsPerSection,
-      [field]: Number(value),
-    });
-  }
-
   return (
     <main className="min-h-svh bg-background text-foreground">
       <AdminNavbar
@@ -290,32 +275,34 @@ export function AdminDashboard({
         notificationsOpen={notificationsOpen}
         onToggleNotifications={() => setNotificationsOpen((value) => !value)}
         notificationPanel={
-          <div className="absolute right-0 top-11 z-30 w-[360px] rounded-lg border bg-card p-3 text-card-foreground shadow-lg">
-            <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="absolute right-0 top-11 z-30 max-h-[min(75vh,640px)] w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-lg border bg-card text-card-foreground shadow-lg sm:w-96">
+            <div className="flex items-start justify-between gap-3 border-b p-3">
               <div>
                 <p className="font-medium">Notifications</p>
                 <p className="text-xs text-muted-foreground">
                   {unreadNotifications.length} unread admin updates
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={markAllNotificationsRead}
-                disabled={!unreadNotifications.length}
-              >
-                Mark all read
-              </Button>
-              <Button
-                aria-label="Close notifications"
-                size="icon"
-                variant="ghost"
-                onClick={() => setNotificationsOpen(false)}
-              >
-                <X className="size-4" />
-              </Button>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={markAllNotificationsRead}
+                  disabled={!unreadNotifications.length}
+                >
+                  Mark all read
+                </Button>
+                <Button
+                  aria-label="Close notifications"
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => setNotificationsOpen(false)}
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
             </div>
-            <div className="space-y-2">
+            <div className="max-h-[calc(min(75vh,640px)-116px)] space-y-2 overflow-y-auto p-3">
               {notifications.map((notification) => (
                 <div
                   key={notification.id}
@@ -377,6 +364,13 @@ export function AdminDashboard({
                 </div>
               ) : null}
             </div>
+            <div className="border-t p-3">
+              <Button asChild className="w-full" variant="outline">
+                <Link href="/admin/notifications" onClick={() => setNotificationsOpen(false)}>
+                  View all notifications
+                </Link>
+              </Button>
+            </div>
           </div>
         }
       />
@@ -436,77 +430,7 @@ export function AdminDashboard({
           </Card>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="space-y-6">
-            <Card id="notifications">
-              <CardHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <CardTitle>Admin notifications</CardTitle>
-                    <CardDescription>
-                      Priority updates from invites, submissions, and assessments.
-                    </CardDescription>
-                  </div>
-                  <Badge variant="secondary" className="gap-1">
-                    <Bell className="size-3" />
-                    {unreadNotifications.length} unread
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {notifications.map((notification) => (
-                  <div
-                    key={notification.id}
-                    className="rounded-md border bg-muted/20 p-4"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="font-medium">{notification.title}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {notification.description}
-                        </p>
-                      </div>
-                      <Badge
-                        variant={
-                          notification.tone === "warning"
-                            ? "secondary"
-                            : notification.tone === "success"
-                              ? "default"
-                              : "outline"
-                        }
-                      >
-                        {notification.tone === "warning"
-                          ? "Needs review"
-                          : notification.tone === "success"
-                            ? "Fresh"
-                            : "General"}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <span>{notification.time}</span>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => markNotificationRead(notification.id)}
-                        disabled={readNotifications.includes(notification.id)}
-                      >
-                        {readNotifications.includes(notification.id)
-                          ? "Read"
-                          : "Mark as read"}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                {!notifications.length ? (
-                  <div className="rounded-md border bg-muted/30 p-6 text-sm text-muted-foreground">
-                    No notifications yet.
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div id="assessments" className="space-y-6">
+        <div id="assessments" className="space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>Assessments</CardTitle>
@@ -569,111 +493,6 @@ export function AdminDashboard({
                 })}
               </CardContent>
             </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Assessment setup</CardTitle>
-                <CardDescription>
-                  Edit section count, timing, and question pick size.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {dashboardJobs.map((job) => (
-                  <div key={job.id} className="rounded-md border p-4">
-                    <div className="mb-4 flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{job.title}</p>
-                        <p className="text-sm text-muted-foreground">{job.role}</p>
-                      </div>
-                      <Badge variant="outline" className="gap-1">
-                        <Clock className="size-3" />
-                        editable
-                      </Badge>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {[
-                        ["sectionCount", "Sections"],
-                        ["timePerSectionMinutes", "Minutes / section"],
-                        ["questionsPerSection", "Questions / section"],
-                      ].map(([field, label]) => (
-                        <div key={field} className="space-y-2">
-                          <Label htmlFor={`${job.id}-${field}`}>{label}</Label>
-                          <Input
-                            id={`${job.id}-${field}`}
-                            type="number"
-                            min={1}
-                            value={String(
-                              job[field as keyof Pick<
-                                JobAssessment,
-                                | "sectionCount"
-                                | "timePerSectionMinutes"
-                                | "questionsPerSection"
-                              >],
-                            )}
-                            onChange={(event) =>
-                              handleConfigChange(
-                                job,
-                                field as
-                                  | "sectionCount"
-                                  | "timePerSectionMinutes"
-                                  | "questionsPerSection",
-                                event.target.value,
-                              )
-                            }
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent submissions</CardTitle>
-                <CardDescription>
-                  Latest candidate activity across all assessments.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {latestResults.length ? (
-                  latestResults.map((result) => (
-                    <div
-                      key={result.id}
-                      className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium">{result.candidateName}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {result.assessmentTitle}
-                        </p>
-                      </div>
-                      <Badge variant={result.status === "Submitted" ? "default" : "secondary"}>
-                        {result.score}%
-                      </Badge>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-md border bg-muted/30 p-6 text-sm text-muted-foreground">
-                    No submissions yet. Completed tests will appear here.
-                  </div>
-                )}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-md border p-4">
-                    <Mail className="mb-3 size-4 text-muted-foreground" />
-                    <p className="text-2xl font-semibold">{candidates.length}</p>
-                    <p className="text-xs text-muted-foreground">email invites</p>
-                  </div>
-                  <div className="rounded-md border p-4">
-                    <FileText className="mb-3 size-4 text-muted-foreground" />
-                    <p className="text-2xl font-semibold">{completedCount}</p>
-                    <p className="text-xs text-muted-foreground">review-ready CVs</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </div>
       </section>
     </main>

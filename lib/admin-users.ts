@@ -113,6 +113,17 @@ export function canViewTemporaryPasswords(
   return user.role === "main-admin" || canModerateAdminUsers(user);
 }
 
+export function canViewCandidateInviteOtp(
+  user: Pick<PublicAdminUser, "role" | "designation">,
+) {
+  const designation = user.designation.trim().toLowerCase();
+  return (
+    user.role === "main-admin" ||
+    designation.includes("hod") ||
+    designation.includes("it")
+  );
+}
+
 function getPrimaryAdminInput() {
   return {
     name: "Faheem Siddiqi",
@@ -513,18 +524,26 @@ export async function saveTemporaryPasswordBackup(
   password: string,
 ) {
   const { users } = await getAdminCollections();
-  const expiresAt = new Date(Date.now() + ADMIN_INVITATION_DURATION_MS);
 
   await users.updateOne(
     { _id: new ObjectId(userId), role: "sub-admin" },
     {
       $set: {
         temporaryPasswordBackup: password,
-        invitationExpiresAt: expiresAt,
+        mustChangePassword: false,
         updatedAt: new Date(),
+      },
+      $unset: {
+        invitationExpiresAt: "",
+        resetTokenHash: "",
+        resetTokenExpiresAt: "",
+        resetTokenPurpose: "",
       },
     },
   );
+
+  const user = await users.findOne({ _id: new ObjectId(userId) });
+  return user ? toPublicAdminUser(user) : null;
 }
 
 export async function clearTemporaryPasswordBackup(userId: string) {

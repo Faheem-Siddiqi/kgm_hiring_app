@@ -8,6 +8,7 @@ import {
 } from "@/features/test/assessment-resources";
 import type { AssessmentAnswers } from "@/features/test/assessment-storage";
 import type { SectionQuestionTypeConfig } from "@/features/test/assessment-resources";
+import type { PublicAssessment } from "@/lib/assessment-types";
 
 export type Candidate = {
   id: string;
@@ -15,10 +16,12 @@ export type Candidate = {
   email: string;
   jobId: string;
   otpCode: string;
+  canViewOtp?: boolean;
   cvUrl: string;
   invitedAt: string;
   inviteEmailStatus?: "pending" | "sent" | "failed";
   inviteEmailFailure?: string;
+  submittedAt?: string;
 };
 
 export type JobAssessment = {
@@ -46,6 +49,7 @@ export type AssessmentViolation = {
 export type AssessmentResult = {
   id: string;
   assessmentId: string;
+  candidateId?: string;
   assessmentTitle: string;
   candidateName: string;
   candidateEmail: string;
@@ -59,7 +63,20 @@ export type AssessmentResult = {
   textScores?: Record<string, number>;
   adminRemark?: string;
   evaluatedAt?: string;
+  evaluatedBy?: {
+    name: string;
+    email: string;
+    remark: string;
+  };
   decision?: "accepted" | "rejected" | "forwarded";
+  reviews?: Array<{
+    id: string;
+    adminName: string;
+    adminEmail: string;
+    remark: string;
+    action: "evaluated" | "accepted" | "rejected" | "forwarded";
+    createdAt: string;
+  }>;
 };
 
 const JOBS_STORAGE_KEY = "kgm-hiring-admin-jobs";
@@ -135,9 +152,92 @@ export function readCandidates() {
   return readJson<Candidate[]>(CANDIDATES_STORAGE_KEY, defaultCandidates);
 }
 
-export function authenticateCandidate(otpCode: string) {
-  const candidate = readCandidates().find(
-    (item) => item.otpCode === otpCode.trim(),
+function toJobAssessment(assessment: PublicAssessment): JobAssessment {
+  const sectionTypeConfigs = Object.fromEntries(
+    assessment.sectionSettings.map((section) => [section.sectionId, section.types]),
+  );
+  const questionsPerSection = Math.max(
+    1,
+    ...assessment.sectionSettings.map(
+      (section) =>
+        section.types.mcq.quantity +
+        section.types.multi.quantity +
+        section.types.text.quantity,
+    ),
+  );
+  const timePerSectionMinutes = Math.max(
+    1,
+    ...assessment.sectionSettings.map((section) =>
+      Math.ceil(
+        Math.max(
+          section.types.mcq.timeLimitSeconds,
+          section.types.multi.timeLimitSeconds,
+          section.types.text.timeLimitSeconds,
+        ) / 60,
+      ),
+    ),
+  );
+
+  return {
+    id: assessment.id,
+    title: assessment.name,
+    role: assessment.questionBankName,
+    createdAt: assessment.createdAt,
+    resourceId: assessment.questionBankId,
+    sectionCount: assessment.sectionCount,
+    timePerSectionMinutes,
+    questionsPerTest: assessment.totalQuestions,
+    questionsPerSection,
+    dummyQuestionsPerSection: 0,
+    sectionTypeConfigs,
+  };
+}
+
+export async function fetchAdminDataSnapshot() {
+  const response = await fetch("/api/admin/hiring-records", { cache: "no-store" });
+  const payload = (await response.json()) as {
+    message?: string;
+    candidates?: Candidate[];
+    results?: AssessmentResult[];
+    canViewCandidateOtp?: boolean;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.message ?? "Could not load admin hiring records.");
+  }
+
+  return {
+    candidates: payload.candidates ?? [],
+    results: payload.results ?? [],
+    canViewCandidateOtp: payload.canViewCandidateOtp ?? false,
+  };
+}
+
+export async function authenticateCandidate(otpCode: string) {
+  const response = await fetch("/api/candidate/otp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ otpCode }),
+  });
+  const payload = (await response.json()) as {
+    message?: string;
+    candidate?: Candidate;
+    assessment?: PublicAssessment;
+  };
+
+  if (!response.ok || !payload.candidate || !payload.assessment) {
+    throw new Error(payload.message ?? "This access code is invalid, expired, or already submitted.");
+  }
+
+  const candidate = payload.candidate;
+  const job = toJobAssessment(payload.assessment);
+  upsertJobAssessment(job);
+  const candidates = readCandidates();
+  writeJson(
+    CANDIDATES_STORAGE_KEY,
+    candidates.some((item) => item.id === candidate.id)
+      ? candidates.map((item) => (item.id === candidate.id ? candidate : item))
+      : [candidate, ...candidates],
   );
 
   if (candidate) {
@@ -403,6 +503,36 @@ export function createCandidate(name: string, email: string, jobId: string) {
   return candidate;
 }
 
+export async function createCandidateRecord(name: string, email: string, jobId: string) {
+  const response = await fetch("/api/admin/candidates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email, assessmentId: jobId }),
+  });
+  const payload = (await response.json()) as {
+    message?: string;
+    candidate?: Candidate;
+    assessment?: PublicAssessment;
+    existingPending?: boolean;
+    canViewCandidateOtp?: boolean;
+  };
+
+  if (!response.ok || !payload.candidate) {
+    throw new Error(payload.message ?? "Could not create candidate.");
+  }
+
+  if (payload.assessment) {
+    upsertJobAssessment(toJobAssessment(payload.assessment));
+  }
+
+  return {
+    candidate: payload.candidate,
+    assessment: payload.assessment,
+    existingPending: payload.existingPending ?? false,
+    canViewCandidateOtp: payload.canViewCandidateOtp ?? false,
+  };
+}
+
 export function updateCandidateInviteEmailStatus(
   candidateId: string,
   status: NonNullable<Candidate["inviteEmailStatus"]>,
@@ -420,6 +550,25 @@ export function updateCandidateInviteEmailStatus(
 
   writeJson(CANDIDATES_STORAGE_KEY, candidates);
   return candidates.find((candidate) => candidate.id === candidateId) ?? null;
+}
+
+export async function updateCandidateInviteEmailStatusRecord(
+  candidateId: string,
+  status: NonNullable<Candidate["inviteEmailStatus"]>,
+  failure?: string | null,
+) {
+  const response = await fetch("/api/admin/candidates", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ candidateId, status, failure }),
+  });
+  const payload = (await response.json()) as { message?: string; candidate?: Candidate };
+
+  if (!response.ok) {
+    throw new Error(payload.message ?? "Could not update invite status.");
+  }
+
+  return payload.candidate ?? null;
 }
 
 export function createViolation(sectionSlug: string, reason: string) {
@@ -443,7 +592,7 @@ export function clearAssessmentViolations() {
   writeAssessmentViolations([]);
 }
 
-export function saveAssessmentResult({
+export async function saveAssessmentResult({
   answers,
   status,
 }: {
@@ -465,17 +614,25 @@ export function saveAssessmentResult({
   if (!assessment) {
     throw new Error("No active assessment is available for submission.");
   }
-  const candidate = candidates.find((item) => item.jobId === assessment.id) ?? {
+  const activeCandidateId =
+    typeof window === "undefined"
+      ? null
+      : window.localStorage.getItem("kgm-hiring-active-candidate-id");
+  const candidate =
+    candidates.find((item) => item.id === activeCandidateId && item.jobId === assessment.id) ??
+    candidates.find((item) => item.jobId === assessment.id && !item.submittedAt) ?? {
     name: "Preview Candidate",
     email: "candidate@example.com",
   };
+  const submittedAt = new Date().toISOString();
   const result: AssessmentResult = {
     id: createId("result"),
     assessmentId: assessment.id,
+    ...("id" in candidate ? { candidateId: candidate.id } : {}),
     assessmentTitle: assessment.title,
     candidateName: candidate.name,
     candidateEmail: candidate.email,
-    submittedAt: new Date().toISOString(),
+    submittedAt,
     answeredCount,
     totalQuestions,
     score,
@@ -484,9 +641,48 @@ export function saveAssessmentResult({
     answers: { ...answers },
   };
 
-  writeJson(RESULTS_STORAGE_KEY, [result, ...readAssessmentResults()]);
+  let savedResult = result;
+  if ("id" in candidate) {
+    const response = await fetch("/api/candidate/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidateId: candidate.id,
+        assessmentId: assessment.id,
+        assessmentTitle: assessment.title,
+        answers: result.answers,
+        answeredCount,
+        totalQuestions,
+        score,
+        status,
+        violations: result.violations,
+      }),
+    });
+    const payload = (await response.json()) as {
+      message?: string;
+      submission?: AssessmentResult;
+    };
+
+    if (!response.ok || !payload.submission) {
+      throw new Error(payload.message ?? "Submission could not be saved.");
+    }
+
+    savedResult = payload.submission;
+  }
+
+  if ("id" in candidate) {
+    writeJson(
+      CANDIDATES_STORAGE_KEY,
+      candidates.map((item) =>
+        item.id === candidate.id ? { ...item, submittedAt } : item,
+      ),
+    );
+  }
   clearAssessmentViolations();
-  return result;
+  window.localStorage.removeItem("kgm-hiring-authenticated");
+  window.localStorage.removeItem("kgm-hiring-active-candidate-id");
+  window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+  return savedResult;
 }
 
 export function updateAssessmentReview(

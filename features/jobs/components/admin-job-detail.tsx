@@ -1,12 +1,14 @@
 "use client";
 
-import { FormEvent, useMemo, useState, useSyncExternalStore } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, ClipboardList, Copy, Loader2, Save, Send, Users, type LucideIcon } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ClipboardList, Copy, Eye, Loader2, Save, Search, Send, Users, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AdminNavbar } from "@/components/admin/admin-navbar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -17,10 +19,11 @@ import {
   type PublicJob,
 } from "@/lib/job-types";
 import {
-  createCandidate,
+  createCandidateRecord,
+  fetchAdminDataSnapshot,
   readAdminDataSnapshot,
   subscribeToAdminData,
-  updateCandidateInviteEmailStatus,
+  updateCandidateInviteEmailStatusRecord,
   upsertJobAssessment,
   type AssessmentResult,
   type Candidate,
@@ -29,6 +32,7 @@ import {
 type AdminSnapshot = {
   candidates?: Candidate[];
   results?: AssessmentResult[];
+  canViewCandidateOtp?: boolean;
 };
 
 type CandidateInviteResponse = {
@@ -36,10 +40,59 @@ type CandidateInviteResponse = {
   mail?: { sent?: boolean; reason?: string | null };
 };
 
+const CANDIDATES_PER_PAGE = 8;
+
+function parseAdminSnapshot(snapshot: string) {
+  try {
+    return JSON.parse(snapshot) as AdminSnapshot;
+  } catch {
+    return {};
+  }
+}
+
 function useAdminData() {
-  const snapshot = useSyncExternalStore(subscribeToAdminData, readAdminDataSnapshot, () => "{}");
-  const data = JSON.parse(snapshot) as AdminSnapshot;
-  return { candidates: data.candidates ?? [], results: data.results ?? [] };
+  const [data, setData] = useState<AdminSnapshot>({});
+  const localSnapshot = useSyncExternalStore(
+    subscribeToAdminData,
+    readAdminDataSnapshot,
+    () => "{}",
+  );
+  const loadData = useCallback(async () => {
+    const snapshot = await fetchAdminDataSnapshot();
+    setData({ candidates: snapshot.candidates, results: snapshot.results });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadInitialData() {
+      try {
+        const snapshot = await fetchAdminDataSnapshot();
+        if (active) {
+          setData({ candidates: snapshot.candidates, results: snapshot.results });
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not load candidates.");
+      }
+    }
+
+    void loadInitialData();
+    const interval = window.setInterval(() => {
+      void loadInitialData();
+    }, 5000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const localData = parseAdminSnapshot(localSnapshot);
+  const candidates = data.candidates?.length ? data.candidates : localData.candidates ?? [];
+  const results = data.results?.length ? data.results : localData.results ?? [];
+  const canViewCandidateOtp = data.canViewCandidateOtp ?? localData.canViewCandidateOtp ?? false;
+
+  return { candidates, results, canViewCandidateOtp, refresh: loadData };
 }
 
 function formatDate(value: string) {
@@ -92,9 +145,16 @@ export function AdminJobDetail({
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
   const [inviteAssessmentId, setInviteAssessmentId] = useState(job.assessmentIds[0] ?? "");
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [candidatePage, setCandidatePage] = useState(1);
+  const [existingInvite, setExistingInvite] = useState<{
+    candidate: Candidate;
+    assessmentTitle: string;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [sendingInvite, setSendingInvite] = useState(false);
-  const { candidates, results } = useAdminData();
+  const [resendingExistingInvite, setResendingExistingInvite] = useState(false);
+  const { candidates, results, canViewCandidateOtp, refresh } = useAdminData();
   const jobCandidates = useMemo(
     () => candidates.filter((candidate) => job.assessmentIds.includes(candidate.jobId)),
     [candidates, job.assessmentIds],
@@ -106,6 +166,32 @@ export function AdminJobDetail({
   const completionRate = jobCandidates.length
     ? Math.round((jobResults.length / jobCandidates.length) * 100)
     : 0;
+  const filteredJobCandidates = useMemo(() => {
+    const query = candidateSearch.trim().toLowerCase();
+
+    if (!query) return jobCandidates;
+
+    return jobCandidates.filter((candidate) => {
+      const assessment = job.assessments.find((item) => item.id === candidate.jobId);
+
+      return [
+        candidate.name,
+        candidate.email,
+        candidate.inviteEmailStatus ?? "sent",
+        assessment?.code ?? "",
+        assessment?.name ?? "",
+      ].some((value) => value.toLowerCase().includes(query));
+    });
+  }, [candidateSearch, job.assessments, jobCandidates]);
+  const totalCandidatePages = Math.max(
+    1,
+    Math.ceil(filteredJobCandidates.length / CANDIDATES_PER_PAGE),
+  );
+  const currentCandidatePage = Math.min(candidatePage, totalCandidatePages);
+  const paginatedCandidates = filteredJobCandidates.slice(
+    (currentCandidatePage - 1) * CANDIDATES_PER_PAGE,
+    currentCandidatePage * CANDIDATES_PER_PAGE,
+  );
   const stats: StatItem[] = [
     { label: "Candidates", value: jobCandidates.length, icon: Users },
     { label: "Completed", value: `${completionRate}%`, icon: CheckCircle2 },
@@ -159,6 +245,42 @@ export function AdminJobDetail({
     toast.success("Job updated.");
   }
 
+  async function sendCandidateInviteByRecord(candidate: Candidate, assessmentTitle: string) {
+    let response: Response;
+    let payload: CandidateInviteResponse;
+
+    try {
+      response = await fetch("/api/admin/candidate-invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidateId: candidate.id,
+          assessmentTitle,
+        }),
+      });
+      payload = (await response.json()) as CandidateInviteResponse;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Could not reach the mail service.";
+      await updateCandidateInviteEmailStatusRecord(candidate.id, "failed", reason);
+      await refresh();
+      toast.error("Email Invite failed. Manual OTP record is available in the candidates table.");
+      return false;
+    }
+
+    if (!response.ok || !payload.mail?.sent) {
+      const reason = payload.mail?.reason ?? payload.message ?? "Email could not be sent.";
+      await updateCandidateInviteEmailStatusRecord(candidate.id, "failed", reason);
+      await refresh();
+      toast.error("Email Invite failed. Manual OTP record is available in the candidates table.");
+      return false;
+    }
+
+    await updateCandidateInviteEmailStatusRecord(candidate.id, "sent");
+    await refresh();
+    toast.success(`Invite email sent to ${candidate.email}.`);
+    return true;
+  }
+
   async function sendInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const assessment = job.assessments.find((item) => item.id === inviteAssessmentId);
@@ -168,54 +290,137 @@ export function AdminJobDetail({
     }
 
     upsertJobAssessment(runtimeAssessmentFromJob(job, assessment));
-    const candidate = createCandidate(candidateName.trim(), candidateEmail.trim(), assessment.id);
     setSendingInvite(true);
     let response: Response;
     let payload: CandidateInviteResponse;
+    let candidate: Candidate | null = null;
 
     try {
+      const assignment = await createCandidateRecord(candidateName.trim(), candidateEmail.trim(), assessment.id);
+      candidate = assignment.candidate;
+
+      if (assignment.existingPending) {
+        setExistingInvite({
+          candidate,
+          assessmentTitle: `${job.title} - ${assessment.name}`,
+        });
+        await refresh();
+        setSendingInvite(false);
+        return;
+      }
+
       response = await fetch("/api/admin/candidate-invites", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          candidateName: candidate.name,
-          candidateEmail: candidate.email,
+          candidateId: candidate.id,
           assessmentTitle: `${job.title} - ${assessment.name}`,
-          otpCode: candidate.otpCode,
-          inviteUrl: buildCandidateLink(candidate),
         }),
       });
       payload = (await response.json()) as CandidateInviteResponse;
     } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : "Could not reach the mail service.";
+      if (candidate) {
+        try {
+          await updateCandidateInviteEmailStatusRecord(
+            candidate.id,
+            "failed",
+            error instanceof Error ? error.message : "Email could not be sent.",
+          );
+        } finally {
+          await refresh();
+        }
+      }
       setSendingInvite(false);
-      updateCandidateInviteEmailStatus(candidate.id, "failed", reason);
-      toast.error("Email failed. Manual OTP is now available in the candidates table.");
+      toast.error(error instanceof Error ? error.message : "Email Invite failed. Manual OTP record is available in the candidates table.");
       return;
     }
 
     setSendingInvite(false);
 
     if (!response.ok || !payload.mail?.sent) {
-      updateCandidateInviteEmailStatus(
+      await updateCandidateInviteEmailStatusRecord(
         candidate.id,
         "failed",
         payload.mail?.reason ?? payload.message ?? "Email could not be sent.",
       );
-      toast.error("Email failed. Manual OTP is now available in the candidates table.");
+      await refresh();
+      toast.error("Email Invite failed. Manual OTP record is available in the candidates table.");
       return;
     }
 
-    updateCandidateInviteEmailStatus(candidate.id, "sent");
+    await updateCandidateInviteEmailStatusRecord(candidate.id, "sent");
+    await refresh();
     setCandidateName("");
     setCandidateEmail("");
+    setCandidateSearch("");
+    setCandidatePage(1);
     toast.success(`Invite email sent to ${candidate.email}.`);
+  }
+
+  async function resendExistingInvite() {
+    if (!existingInvite) return;
+
+    setResendingExistingInvite(true);
+    const sent = await sendCandidateInviteByRecord(
+      existingInvite.candidate,
+      existingInvite.assessmentTitle,
+    );
+    setResendingExistingInvite(false);
+
+    if (sent) {
+      setExistingInvite(null);
+      setCandidateName("");
+      setCandidateEmail("");
+    }
   }
 
   return (
     <main className="min-h-svh bg-background text-foreground">
       <AdminNavbar />
+      <Dialog open={Boolean(existingInvite)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Existing active invitation</DialogTitle>
+            <DialogDescription>
+              This candidate already has an active invitation for this job assessment.
+              A new assignment was not created. You can resend the email using the
+              existing invitation.
+            </DialogDescription>
+          </DialogHeader>
+          {existingInvite ? (
+            <div className="space-y-3 rounded-md border bg-muted/20 p-4 text-sm">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">Candidate</span>
+                <span className="font-medium">{existingInvite.candidate.name}</span>
+                <span className="text-muted-foreground">{existingInvite.candidate.email}</span>
+              </div>
+              <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                OTP is reused from the active invitation and is not shown here.
+                If email fails, manual OTP visibility is limited to HOD and IT
+                personnel only.
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={resendingExistingInvite}
+              onClick={() => setExistingInvite(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={resendingExistingInvite}
+              onClick={() => void resendExistingInvite()}
+            >
+              {resendingExistingInvite ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+              {resendingExistingInvite ? "Sending" : "Send email invitation"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
@@ -384,9 +589,176 @@ export function AdminJobDetail({
             <CardTitle>Candidates for this job</CardTitle>
             <CardDescription>Open candidate assessment detail when a submission exists.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3">
+          <CardContent className="space-y-4">
+            <div className="relative max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={candidateSearch}
+                onChange={(event) => {
+                  setCandidateSearch(event.target.value);
+                  setCandidatePage(1);
+                }}
+                className="pl-9 focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
+                placeholder="Search candidate, email, or assessment"
+                aria-label="Search candidates"
+              />
+            </div>
+
+            <div className="overflow-hidden rounded-md border">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px] text-sm">
+                  <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Candidate</th>
+                      <th className="px-4 py-3 font-medium">Assessment</th>
+                      <th className="px-4 py-3 font-medium">Invite</th>
+                      <th className="px-4 py-3 font-medium">Submitted</th>
+                      <th className="px-4 py-3 text-right font-medium">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {paginatedCandidates.map((candidate) => {
+                      const result = jobResults.find((item) =>
+                        item.candidateId
+                          ? item.candidateId === candidate.id
+                          : item.candidateEmail === candidate.email && item.assessmentId === candidate.jobId,
+                      );
+                      const assessment = job.assessments.find((item) => item.id === candidate.jobId);
+                      const emailFailed = candidate.inviteEmailStatus === "failed";
+
+                      return (
+                        <tr key={candidate.id} className="bg-background align-top transition hover:bg-muted/30">
+                          <td className="px-4 py-3">
+                            <p className="font-medium">{candidate.name}</p>
+                            <p className="text-xs text-muted-foreground">{candidate.email}</p>
+                            {emailFailed ? (
+                              <div className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 p-3">
+                                <p className="text-xs font-medium text-destructive">
+                                  Email failed. Share this OTP manually.
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {candidate.inviteEmailFailure}
+                                </p>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  OTP is visible to HOD and IT personnel only.
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {canViewCandidateOtp ? (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => void copyText(candidate.otpCode, "OTP copied")}
+                                      >
+                                        <Copy className="size-4" />
+                                        Copy OTP {candidate.otpCode}
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => void copyText(buildCandidateLink(candidate), "Candidate assessment link copied")}
+                                      >
+                                        <Copy className="size-4" />
+                                        Copy link
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <Badge variant="outline" className="border-destructive/30 bg-background text-destructive">
+                                      OTP ******
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="font-medium">{assessment?.code ?? "Assessment"}</p>
+                            <p className="text-xs text-muted-foreground">{assessment?.name ?? candidate.jobId}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge
+                              variant={emailFailed ? "outline" : "secondary"}
+                              className={
+                                emailFailed
+                                  ? "border-destructive/30 bg-destructive/10 text-destructive capitalize"
+                                  : "capitalize"
+                              }
+                            >
+                              {candidate.inviteEmailStatus ?? "sent"}
+                            </Badge>
+                            <p className="mt-1 text-xs text-muted-foreground">{formatDate(candidate.invitedAt)}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            {result ? (
+                              <>
+                                <Badge variant="secondary">Submitted</Badge>
+                                <p className="mt-1 text-xs text-muted-foreground">{formatDate(result.submittedAt)}</p>
+                              </>
+                            ) : (
+                              <Badge variant="outline">Waiting</Badge>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button asChild variant={result ? "default" : "outline"} size="sm">
+                              <Link href={result ? `/admin/submissions/${result.id}` : `/admin/assessment/${candidate.jobId}`}>
+                                {result ? <Eye className="size-4" /> : <Send className="size-4" />}
+                                {result ? `Open (${result.score}%)` : "Waiting"}
+                              </Link>
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!paginatedCandidates.length ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                          {jobCandidates.length
+                            ? "No candidates match your search."
+                            : "Invited candidates for this job will appear here."}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {filteredJobCandidates.length > CANDIDATES_PER_PAGE ? (
+              <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Page {currentCandidatePage} of {totalCandidatePages} - {filteredJobCandidates.length} candidates
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={currentCandidatePage <= 1}
+                    onClick={() => setCandidatePage((page) => Math.max(1, page - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={currentCandidatePage >= totalCandidatePages}
+                    onClick={() => setCandidatePage((page) => Math.min(totalCandidatePages, page + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            <div className="hidden">
             {jobCandidates.map((candidate) => {
-              const result = jobResults.find((item) => item.candidateEmail === candidate.email && item.assessmentId === candidate.jobId);
+              const result = jobResults.find((item) =>
+                item.candidateId
+                  ? item.candidateId === candidate.id
+                  : item.candidateEmail === candidate.email && item.assessmentId === candidate.jobId,
+              );
               const assessment = job.assessments.find((item) => item.id === candidate.jobId);
               const emailFailed = candidate.inviteEmailStatus === "failed";
               return (
@@ -443,6 +815,7 @@ export function AdminJobDetail({
                 Invited candidates for this job will appear here.
               </div>
             ) : null}
+            </div>
           </CardContent>
         </Card>
       </section>

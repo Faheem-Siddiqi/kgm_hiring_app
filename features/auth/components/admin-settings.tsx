@@ -398,7 +398,7 @@ export function AdminSettings() {
       toast.success(nextMessage);
     } else {
       const nextMessage =
-        `Admin added successfully. Email delivery is unavailable right now, so you can send the first-time login details manually. This setup access expires in ${ADMIN_INVITATION_EXPIRY_DAYS} days.`;
+        "Admin added successfully. Email delivery is unavailable right now, so the account is active and you can share the generated first-time password manually.";
       setMessage(nextMessage);
       setFallbackPassword(result.temporaryPassword ?? "");
       toast.success("Admin added. Use the manual login details below.");

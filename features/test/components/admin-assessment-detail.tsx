@@ -1,24 +1,27 @@
 "use client";
-
 import { FormEvent, useMemo, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
 import {
   ArrowLeft,
   BarChart3,
   CheckCircle2,
   Clock,
+  Eye,
   Save,
+  Search,
   Settings2,
   Users,
   type LucideIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
+
 import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   readAdminDataSnapshot,
@@ -86,6 +89,7 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
     assessment.sectionSettings[0]?.sectionId ?? "",
   );
   const [assignedJobPage, setAssignedJobPage] = useState(1);
+  const [assignedJobSearch, setAssignedJobSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const { candidates, results } = useAdminData();
   const questionBank = assessmentResourceSummaries.find(
@@ -105,12 +109,23 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
   const activeSection =
     sectionSettings.find((section) => section.sectionId === activeSectionId) ??
     sectionSettings[0];
+  const filteredAssignedJobs = useMemo(() => {
+    const query = assignedJobSearch.trim().toLowerCase();
+
+    if (!query) return assessment.assignedJobs;
+
+    return assessment.assignedJobs.filter((job) =>
+      [job.title, job.department, job.location, job.status].some((value) =>
+        value.toLowerCase().includes(query),
+      ),
+    );
+  }, [assessment.assignedJobs, assignedJobSearch]);
   const totalAssignedJobPages = Math.max(
     1,
-    Math.ceil(assessment.assignedJobs.length / ASSIGNED_JOBS_PER_PAGE),
+    Math.ceil(filteredAssignedJobs.length / ASSIGNED_JOBS_PER_PAGE),
   );
   const currentAssignedJobPage = Math.min(assignedJobPage, totalAssignedJobPages);
-  const paginatedAssignedJobs = assessment.assignedJobs.slice(
+  const paginatedAssignedJobs = filteredAssignedJobs.slice(
     (currentAssignedJobPage - 1) * ASSIGNED_JOBS_PER_PAGE,
     currentAssignedJobPage * ASSIGNED_JOBS_PER_PAGE,
   );
@@ -137,6 +152,7 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
                 [type]: {
                   ...section.types[type],
                   [field]: value,
+                  ...(field === "quantity" && value === 0 ? { timeLimitSeconds: 0 } : {}),
                 },
               },
             }
@@ -236,22 +252,19 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
               <CardDescription>Update stored question quantities and time limits by section.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid auto-cols-fr grid-flow-col overflow-x-auto border-b">
-                {sectionSettings.map((section, index) => (
-                  <button
-                    key={section.sectionId}
-                    type="button"
-                    className={`min-w-28 border-b-4 px-3 pb-3 pt-1 text-center text-sm font-medium transition ${
-                      section.sectionId === activeSection?.sectionId
-                        ? "border-foreground text-foreground"
-                        : "border-transparent text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground"
-                    }`}
-                    onClick={() => setActiveSectionId(section.sectionId)}
-                  >
-                    {formatSectionTab(index)}
-                  </button>
-                ))}
-              </div>
+              <Tabs value={activeSectionId} onValueChange={setActiveSectionId}>
+                <TabsList className="flex h-auto w-full justify-start gap-2 overflow-x-auto rounded-none bg-transparent p-0 text-foreground">
+                  {sectionSettings.map((section, index) => (
+                    <TabsTrigger
+                      key={section.sectionId}
+                      value={section.sectionId}
+                      className="min-w-28 rounded-md border px-4 py-2.5 text-sm text-muted-foreground data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-xs"
+                    >
+                      {formatSectionTab(index)}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
 
               {activeSection ? (
                 <div className="rounded-md border bg-muted/10 p-4">
@@ -273,6 +286,8 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
                         (section) => section.id === activeSection.sectionId,
                       );
                       const maxQuantity = sourceSection?.counts[type] ?? activeSection.types[type].quantity;
+                      const quantity = activeSection.types[type].quantity;
+                      const timeDisabled = maxQuantity <= 0 || quantity === 0;
 
                       return (
                         <div
@@ -285,8 +300,9 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
                               type="number"
                               min={0}
                               max={maxQuantity}
+                              disabled={maxQuantity <= 0}
                               placeholder={`Quantity (max ${maxQuantity})`}
-                              value={activeSection.types[type].quantity || ""}
+                              value={quantity}
                               onChange={(event) =>
                                 updateTypeSetting(
                                   activeSection.sectionId,
@@ -298,10 +314,11 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
                             />
                             <Input
                               type="number"
-                              min={1}
+                              min={0}
                               max={3600}
+                              disabled={timeDisabled}
                               placeholder="Time (sec)"
-                              value={activeSection.types[type].timeLimitSeconds || ""}
+                              value={timeDisabled ? 0 : activeSection.types[type].timeLimitSeconds}
                               onChange={(event) =>
                                 updateTypeSetting(
                                   activeSection.sectionId,
@@ -332,29 +349,90 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
         <Card>
           <CardHeader>
             <CardTitle>Assigned jobs</CardTitle>
-            <CardDescription>Jobs using this assessment remain managed from the Jobs workspace.</CardDescription>
+            <CardDescription>Search jobs using this assessment and open the job workspace directly.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {paginatedAssignedJobs.map((job) => (
-              <Link key={job.id} href={`/admin/jobs/${job.slug}`} className="rounded-md border p-4 transition hover:bg-muted/40">
-                <Badge variant={job.status === "open" || job.status === "reopened" ? "secondary" : "outline"} className="capitalize">
-                  {job.status}
-                </Badge>
-                <p className="mt-3 font-medium">{job.title}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{job.department}</p>
-              </Link>
-            ))}
-            {!assessment.assignedJobs.length ? (
-              <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground sm:col-span-2 lg:col-span-3">
-                This assessment is not assigned to any job yet.
-              </div>
-            ) : null}
+            <div className="relative max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={assignedJobSearch}
+                onChange={(event) => {
+                  setAssignedJobSearch(event.target.value);
+                  setAssignedJobPage(1);
+                }}
+                className="pl-9 focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
+                placeholder="Search title, department, or location"
+                aria-label="Search assigned jobs"
+              />
             </div>
-            {assessment.assignedJobs.length > ASSIGNED_JOBS_PER_PAGE ? (
+
+            <div className="overflow-hidden rounded-md border">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Job title</th>
+                      <th className="px-4 py-3 font-medium">Department</th>
+                      <th className="px-4 py-3 font-medium">Location</th>
+                      <th className="px-4 py-3 font-medium">Candidates</th>
+                      <th className="px-4 py-3 text-right font-medium">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {paginatedAssignedJobs.map((job) => (
+
+                      
+                      <tr key={job.id} className="bg-background transition hover:bg-muted/30">
+                        
+                        
+                        
+                        
+                        <td className="px-4 py-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{job.title}</p>
+                            <Badge
+                              variant={job.status === "open" || job.status === "reopened" ? "secondary" : "outline"}
+                              className="mt-1 capitalize"
+                            >
+                              {job.status}
+                            </Badge>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{job.department}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{job.location}</td>
+                        <td className="px-4 py-3">
+                          <Badge variant="outline" className="rounded-md">
+                            {assessmentCandidates.length}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button asChild size="sm" variant="outline">
+                            <Link href={`/admin/jobs/${job.slug}`}>
+                              <Eye className="size-4" />
+                              Open job
+                            </Link>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!paginatedAssignedJobs.length ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                          {assessment.assignedJobs.length
+                            ? "No assigned jobs match your search."
+                            : "This assessment is not assigned to any job yet."}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {filteredAssignedJobs.length > ASSIGNED_JOBS_PER_PAGE ? (
               <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Page {currentAssignedJobPage} of {totalAssignedJobPages} - {assessment.assignedJobs.length} assigned jobs
+                  Page {currentAssignedJobPage} of {totalAssignedJobPages} - {filteredAssignedJobs.length} assigned jobs
                 </p>
                 <div className="flex gap-2">
                   <Button

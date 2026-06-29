@@ -34,7 +34,7 @@ export function OtpLoginForm() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!/^\d{6}$/.test(otp)) {
@@ -42,20 +42,23 @@ export function OtpLoginForm() {
       return;
     }
 
-    const candidate = authenticateCandidate(otp);
-
-    if (!candidate) {
-      toast.error("This access code is invalid or has expired.");
-      return;
-    }
-
     setIsSubmitting(true);
-    localStorage.setItem("kgm-hiring-authenticated", "true");
-    toast.success(`Welcome, ${candidate.name}.`);
+    try {
+      const candidate = await authenticateCandidate(otp);
+      localStorage.setItem("kgm-hiring-authenticated", "true");
+      toast.success(`Welcome, ${candidate.name}.`);
 
-    setTimeout(() => {
-      router.push("/test");
-    }, 500);
+      setTimeout(() => {
+        router.push("/test");
+      }, 500);
+    } catch (error) {
+      setIsSubmitting(false);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "This access code is invalid, expired, or already submitted.",
+      );
+    }
   }
 
   return (
