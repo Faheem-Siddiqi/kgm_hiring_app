@@ -9,6 +9,15 @@ export const metadata: Metadata = {
     template: "%s | KGM Hiring",
   },
   description: "Candidate assessments and hiring operations for KGM.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.jpeg", type: "image/jpeg" },
+      { url: "/favicon.jpg", type: "image/jpeg" },
+    ],
+    shortcut: [{ url: "/favicon.ico", sizes: "any" }],
+    apple: [{ url: "/apple-icon.jpeg", type: "image/jpeg" }],
+  },
 };
 
 export default function RootLayout({

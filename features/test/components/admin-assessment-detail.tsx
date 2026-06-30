@@ -5,9 +5,10 @@ import {
   BarChart3,
   CheckCircle2,
   Clock,
-  Eye,
+  
   Save,
   Search,
+  
   Settings2,
   Users,
   type LucideIcon,
@@ -372,7 +373,9 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
                   <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="px-4 py-3 font-medium">Job title</th>
+                    
                       <th className="px-4 py-3 font-medium">Department</th>
+                      <th className="px-4 py-3 font-medium">Status</th>
                       <th className="px-4 py-3 font-medium">Location</th>
                       <th className="px-4 py-3 font-medium">Candidates</th>
                       <th className="px-4 py-3 text-right font-medium">Action</th>
@@ -390,28 +393,31 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
                         <td className="px-4 py-3">
                           <div className="min-w-0">
                             <p className="truncate font-medium">{job.title}</p>
-                            <Badge
-                              variant={job.status === "open" || job.status === "reopened" ? "secondary" : "outline"}
-                              className="mt-1 capitalize"
-                            >
-                              {job.status}
-                            </Badge>
+                            
                           </div>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{job.department}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{job.location}</td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className="rounded-md">
-                            {assessmentCandidates.length}
-                          </Badge>
+                       <td className="px-4 py-3 text-muted-foreground">{job.status}</td>
+                       
+                       <td className="px-4 py-3 text-muted-foreground">{job.location}</td>
+                        <td className="px-4 py-3 ">
+                          
+                            {assessmentCandidates?.length ?? 0}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <Button asChild size="sm" variant="outline">
-                            <Link href={`/admin/jobs/${job.slug}`}>
-                              <Eye className="size-4" />
-                              Open job
-                            </Link>
-                          </Button>
+                  <Link
+  href={`/admin/jobs/${job.slug}`}
+
+
+  className="inline-flex items-center hover:text-black   text-muted-foreground justify-end gap-1.5"
+>
+  <span className="relative block w-fit after:absolute after:left-0 after:bottom-0 after:block after:h-[1px] after:w-full after:origin-center after:scale-x-0 after:bg-current after:transition after:duration-300 after:content-[''] hover:after:scale-x-100">
+    View Job
+  </span>
+</Link>
+
+                         
+                          
                         </td>
                       </tr>
                     ))}

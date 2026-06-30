@@ -1,6 +1,4 @@
 "use client";
-
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
@@ -10,8 +8,10 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { AdminNavbar } from "@/components/admin/admin-navbar";
+import Link from "next/link";
 import { toast } from "sonner";
+
+import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -398,8 +398,8 @@ export function AdminDashboard({
                 </div>
               ) : null}
             </div>
-            <div className="border-t p-3">
-              <Button asChild className="w-full" variant="outline">
+            <div className="border-t p-5">
+              <Button asChild className="w-full " variant="outline">
                 <Link href="/admin/notifications" onClick={() => setNotificationsOpen(false)}>
                   View all notifications
                 </Link>

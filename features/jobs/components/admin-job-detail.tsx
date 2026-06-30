@@ -1,9 +1,9 @@
 "use client";
-
 import { FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
 import { ArrowLeft, CheckCircle2, ClipboardList, Copy, Eye, Loader2, Save, Search, Send, Users, type LucideIcon } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
+
 import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,12 +12,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  JOB_EXPERIENCE_LEVELS,
-  JOB_LOCATIONS,
-  type JobAssessmentOption,
-  type PublicJob,
-} from "@/lib/job-types";
 import {
   createCandidateRecord,
   fetchAdminDataSnapshot,
@@ -28,6 +22,12 @@ import {
   type AssessmentResult,
   type Candidate,
 } from "@/features/test/admin-storage";
+import {
+  JOB_EXPERIENCE_LEVELS,
+  JOB_LOCATIONS,
+  type JobAssessmentOption,
+  type PublicJob,
+} from "@/lib/job-types";
 
 type AdminSnapshot = {
   candidates?: Candidate[];
@@ -718,7 +718,8 @@ export function AdminJobDetail({
                       <th className="px-4 py-3 font-medium">Assessment</th>
                       <th className="px-4 py-3 font-medium">Invite</th>
                       <th className="px-4 py-3 font-medium">Expiry</th>
-                      <th className="px-4 py-3 font-medium">Submitted</th>
+                      <th className="px-4 py-3 font-medium">Submission</th>
+                      <th className="px-4 py-3 font-medium">Score</th>
                       <th className="px-4 py-3 text-right font-medium">Action</th>
                     </tr>
                   </thead>
@@ -828,13 +829,33 @@ export function AdminJobDetail({
                               <Badge variant="outline">Waiting</Badge>
                             )}
                           </td>
+                        
+                        
+                      <td className="px-4 py-3">
+  <div className="flex h-full items-center">
+    <span className="text-xs font-medium text-foreground">
+      {latestResult ? `${latestResult.score ?? 0}%` : "Not Attempted"}
+    </span>
+  </div>
+</td>
                           <td className="px-4 py-3 text-right">
-                            <Button asChild variant={latestResult ? "default" : "outline"} size="sm">
-                              <Link href={latestResult ? `/admin/submissions/${latestResult.id}` : `/admin/assessment/${pendingAssessmentId}`}>
-                                {latestResult ? <Eye className="size-4" /> : <Send className="size-4" />}
-                                {latestResult ? `Open (${latestResult.score}%)` : "Waiting"}
-                              </Link>
-                            </Button>
+
+
+                            <Link
+  href={latestResult ? `/admin/submissions/${latestResult.id}` : "#"}
+  onClick={(e) => {
+    if (!latestResult) e.preventDefault();
+  }}
+  aria-disabled={!latestResult}
+  className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide hover:text-black text-muted-foreground "
+>
+  <span className="relative block w-fit   after:absolute after:left-0 after:bottom-0 after:block after:h-[1px] after:w-full after:origin-center after:scale-x-0 after:bg-current after:transition after:duration-300 after:content-[''] hover:after:scale-x-100">
+    {latestResult ? `View` : "Waiting"}
+  </span>
+</Link>
+
+
+                       
                           </td>
                         </tr>
                       );
