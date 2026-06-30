@@ -50,19 +50,16 @@ export const PATCH = withErrorHandler(async (
 
   const { submissionId } = await params;
   const body = (await request.json()) as {
-    remark?: string;
     action?: "evaluated" | "accepted" | "rejected" | "forwarded";
     textScores?: Record<string, number>;
     score?: number;
   };
-  const remark = body.remark?.trim() ?? "";
 
   const submission = await addSubmissionReview({
     submissionId,
     adminId: session.user.id,
     adminName: session.user.name,
     adminEmail: session.user.email,
-    remark,
     action: body.action ?? "evaluated",
     textScores: body.textScores,
     score: body.score,

@@ -49,7 +49,7 @@ export function OtpLoginForm() {
       toast.success(`Welcome, ${candidate.name}.`);
 
       setTimeout(() => {
-        router.push("/test");
+        router.push("/assessment");
       }, 500);
     } catch (error) {
       setIsSubmitting(false);

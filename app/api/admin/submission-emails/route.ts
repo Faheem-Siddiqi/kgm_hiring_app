@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { ADMIN_SESSION_COOKIE, getAdminSessionToken } from "@/lib/admin-session";
 import { validateAdminSessionToken } from "@/lib/admin-users";
-import { sendApplicationMail } from "@/lib/mail/mail-service";
+import { sendReviewSubmissionEmail } from "@/lib/mail/review-submission-mailer";
 import { withErrorHandler } from "@/lib/server-error";
 
 export const runtime = "nodejs";
@@ -36,11 +36,10 @@ export const POST = withErrorHandler(async (request: Request) => {
     );
   }
 
-  const mail = await sendApplicationMail({
+  const mail = await sendReviewSubmissionEmail({
     to,
     subject,
-    text: body,
-    operation: "send-candidate-submission-email",
+    body,
   });
 
   return NextResponse.json({

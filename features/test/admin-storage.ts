@@ -15,10 +15,15 @@ export type Candidate = {
   name: string;
   email: string;
   jobId: string;
+  jobAssignmentId?: string;
+  jobTitle?: string;
+  assessmentIds?: string[];
   otpCode: string;
   canViewOtp?: boolean;
   cvUrl: string;
   invitedAt: string;
+  inviteExpiresAt: string;
+  isInviteExpired: boolean;
   inviteEmailStatus?: "pending" | "sent" | "failed";
   inviteEmailFailure?: string;
   submittedAt?: string;
@@ -61,19 +66,16 @@ export type AssessmentResult = {
   violations: AssessmentViolation[];
   answers?: AssessmentAnswers;
   textScores?: Record<string, number>;
-  adminRemark?: string;
   evaluatedAt?: string;
   evaluatedBy?: {
     name: string;
     email: string;
-    remark: string;
   };
   decision?: "accepted" | "rejected" | "forwarded";
   reviews?: Array<{
     id: string;
     adminName: string;
     adminEmail: string;
-    remark: string;
     action: "evaluated" | "accepted" | "rejected" | "forwarded";
     createdAt: string;
   }>;
@@ -223,6 +225,7 @@ export async function authenticateCandidate(otpCode: string) {
     message?: string;
     candidate?: Candidate;
     assessment?: PublicAssessment;
+    assessments?: PublicAssessment[];
   };
 
   if (!response.ok || !payload.candidate || !payload.assessment) {
@@ -230,8 +233,9 @@ export async function authenticateCandidate(otpCode: string) {
   }
 
   const candidate = payload.candidate;
-  const job = toJobAssessment(payload.assessment);
-  upsertJobAssessment(job);
+  const assessments = payload.assessments?.length ? payload.assessments : [payload.assessment];
+  const jobs = assessments.map(toJobAssessment);
+  jobs.forEach(upsertJobAssessment);
   const candidates = readCandidates();
   writeJson(
     CANDIDATES_STORAGE_KEY,
@@ -241,7 +245,14 @@ export async function authenticateCandidate(otpCode: string) {
   );
 
   if (candidate) {
-    writeActiveJobAssessment(candidate.jobId);
+    const submittedAssessmentIds = new Set(
+      readAssessmentResults()
+        .filter((result) => result.candidateId === candidate.id)
+        .map((result) => result.assessmentId),
+    );
+    const nextAssessment =
+      jobs.find((item) => !submittedAssessmentIds.has(item.id)) ?? jobs[0];
+    writeActiveJobAssessment(nextAssessment.id);
     window.localStorage.setItem("kgm-hiring-active-candidate-id", candidate.id);
   }
 
@@ -495,6 +506,8 @@ export function createCandidate(name: string, email: string, jobId: string) {
     otpCode: createOtpCode(),
     cvUrl: "https://drive.google.com/file/d/sample-cv-preview/view",
     invitedAt: new Date().toISOString(),
+    inviteExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    isInviteExpired: false,
     inviteEmailStatus: "pending",
   };
 
@@ -503,16 +516,28 @@ export function createCandidate(name: string, email: string, jobId: string) {
   return candidate;
 }
 
-export async function createCandidateRecord(name: string, email: string, jobId: string) {
+export async function createCandidateRecord(
+  name: string,
+  email: string,
+  assignmentId: string,
+  assignmentType: "assessment" | "job" = "assessment",
+  inviteExpiresAt?: string,
+) {
   const response = await fetch("/api/admin/candidates", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, email, assessmentId: jobId }),
+    body: JSON.stringify({
+      name,
+      email,
+      inviteExpiresAt,
+      ...(assignmentType === "job" ? { jobId: assignmentId } : { assessmentId: assignmentId }),
+    }),
   });
   const payload = (await response.json()) as {
     message?: string;
     candidate?: Candidate;
     assessment?: PublicAssessment;
+    assessments?: PublicAssessment[];
     existingPending?: boolean;
     canViewCandidateOtp?: boolean;
   };
@@ -521,9 +546,12 @@ export async function createCandidateRecord(name: string, email: string, jobId: 
     throw new Error(payload.message ?? "Could not create candidate.");
   }
 
-  if (payload.assessment) {
-    upsertJobAssessment(toJobAssessment(payload.assessment));
-  }
+  const assessments = payload.assessments?.length
+    ? payload.assessments
+    : payload.assessment
+      ? [payload.assessment]
+      : [];
+  assessments.forEach((assessment) => upsertJobAssessment(toJobAssessment(assessment)));
 
   return {
     candidate: payload.candidate,
@@ -619,7 +647,11 @@ export async function saveAssessmentResult({
       ? null
       : window.localStorage.getItem("kgm-hiring-active-candidate-id");
   const candidate =
-    candidates.find((item) => item.id === activeCandidateId && item.jobId === assessment.id) ??
+    candidates.find(
+      (item) =>
+        item.id === activeCandidateId &&
+        (item.jobId === assessment.id || item.assessmentIds?.includes(assessment.id)),
+    ) ??
     candidates.find((item) => item.jobId === assessment.id && !item.submittedAt) ?? {
     name: "Preview Candidate",
     email: "candidate@example.com",
@@ -642,6 +674,7 @@ export async function saveAssessmentResult({
   };
 
   let savedResult = result;
+  let nextPendingAssessmentId: string | null = null;
   if ("id" in candidate) {
     const response = await fetch("/api/candidate/submissions", {
       method: "POST",
@@ -671,17 +704,47 @@ export async function saveAssessmentResult({
   }
 
   if ("id" in candidate) {
+    const previousResults = readAssessmentResults();
+    const nextResults = previousResults.some((item) => item.id === savedResult.id)
+      ? previousResults.map((item) => (item.id === savedResult.id ? savedResult : item))
+      : [savedResult, ...previousResults];
+    const assignedAssessmentIds = candidate.assessmentIds?.length
+      ? candidate.assessmentIds
+      : [candidate.jobId];
+    const submittedAssessmentIds = new Set(
+      nextResults
+        .filter((item) => item.candidateId === candidate.id)
+        .map((item) => item.assessmentId),
+    );
+    const hasPendingAssessments = assignedAssessmentIds.some(
+      (id) => !submittedAssessmentIds.has(id),
+    );
+    nextPendingAssessmentId =
+      assignedAssessmentIds.find((id) => !submittedAssessmentIds.has(id)) ?? null;
+
+    writeJson(RESULTS_STORAGE_KEY, nextResults);
     writeJson(
       CANDIDATES_STORAGE_KEY,
       candidates.map((item) =>
-        item.id === candidate.id ? { ...item, submittedAt } : item,
+        item.id === candidate.id && !hasPendingAssessments
+          ? { ...item, submittedAt }
+          : item,
       ),
     );
+
+    if (!hasPendingAssessments) {
+      window.localStorage.removeItem("kgm-hiring-authenticated");
+      window.localStorage.removeItem("kgm-hiring-active-candidate-id");
+    }
   }
   clearAssessmentViolations();
-  window.localStorage.removeItem("kgm-hiring-authenticated");
-  window.localStorage.removeItem("kgm-hiring-active-candidate-id");
-  window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+  window.localStorage.removeItem("kgm-hiring-assessment-answers");
+  if (nextPendingAssessmentId) {
+    window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, nextPendingAssessmentId);
+  } else {
+    window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+  }
+  window.dispatchEvent(new Event("kgm-hiring-assessment-answers-change"));
   return savedResult;
 }
 
@@ -689,7 +752,6 @@ export function updateAssessmentReview(
   resultId: string,
   updates: {
     textScores?: Record<string, number>;
-    adminRemark?: string;
     decision?: AssessmentResult["decision"];
   },
 ) {

@@ -2,6 +2,7 @@
 
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   BriefcaseBusiness,
   CheckCircle2,
@@ -219,6 +220,7 @@ export function AdminJobs({
   initialPagination: Pagination;
   assessments: JobAssessmentOption[];
 }) {
+  const router = useRouter();
   const assessmentPickerRef = useRef<HTMLDivElement | null>(null);
   const [jobs, setJobs] = useState<PublicJob[]>(initialJobs);
   const [summary, setSummary] = useState<JobListSummary>(initialSummary);
@@ -328,9 +330,30 @@ export function AdminJobs({
       return;
     }
 
+    setJobs((current) => {
+      const nextJobs = [result.job!, ...current.filter((job) => job.id !== result.job!.id)];
+      return nextJobs.slice(0, pagination.pageSize);
+    });
+    setSummary((current) => ({
+      ...current,
+      total: current.total + 1,
+      open: current.open + (result.job!.status === "open" ? 1 : 0),
+      paused: current.paused + (result.job!.status === "paused" ? 1 : 0),
+      closed: current.closed + (result.job!.status === "closed" ? 1 : 0),
+    }));
+    setPagination((current) => {
+      const total = current.total + 1;
+      return {
+        ...current,
+        page: 1,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / current.pageSize)),
+      };
+    });
+    setSearchQuery("");
     toast.success("Job created");
     setForm({ ...emptyForm });
-    await loadJobs();
+    router.refresh();
   }
 
   async function changeStatus(jobId: string, status: JobStatus) {

@@ -53,6 +53,22 @@ type AdminDashboardProps = {
   initialServerAssessments?: PublicAssessment[];
   initialServerAssessmentSummary?: AssessmentListSummary;
   initialPublicJobs?: PublicJob[];
+  initialHiringStats?: {
+    submissions: number;
+    averageScore: number;
+    assessments: Record<string, { invited: number; submissions: number; averageScore: number }>;
+    submissionStats: Record<string, { submissions: number; averageScore: number }>;
+    recentInvites?: Array<{
+      id: string;
+      name: string;
+      email: string;
+      jobTitle: string;
+      invitedAt: string;
+      inviteExpiresAt: string;
+      isInviteExpired: boolean;
+      submittedAt?: string;
+    }>;
+  };
 };
 
 const READ_NOTIFICATIONS_KEY = "kgm-hiring-admin-read-notifications";
@@ -63,10 +79,12 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function useAdminData() {
+function useAdminData(enabled = true) {
   const [adminData, setAdminData] = useState<AdminSnapshot>({});
 
   useEffect(() => {
+    if (!enabled) return;
+
     let active = true;
 
     async function loadData() {
@@ -85,7 +103,7 @@ function useAdminData() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [enabled]);
 
   return {
     candidates: adminData.candidates ?? [],
@@ -228,12 +246,13 @@ export function AdminDashboard({
   initialServerAssessments = [],
   initialServerAssessmentSummary,
   initialPublicJobs = [],
+  initialHiringStats,
 }: AdminDashboardProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [readNotifications, setReadNotifications] = useState<string[]>(() =>
     readNotificationIds(),
   );
-  const { candidates, jobs, results } = useAdminData();
+  const { candidates, jobs, results } = useAdminData(!initialHiringStats);
   const dashboardJobs = useMemo(
     () =>
       jobs.length
@@ -248,7 +267,22 @@ export function AdminDashboard({
   const unreadNotifications = notifications.filter(
     (notification) => !readNotifications.includes(notification.id),
   );
-  const averageScore = getAverageScore(results);
+  const averageScore = results.length
+    ? getAverageScore(results)
+    : initialHiringStats?.averageScore ?? 0;
+  const dashboardInvites =
+    candidates.length
+      ? candidates.slice(0, 8).map((candidate) => ({
+          id: candidate.id,
+          name: candidate.name,
+          email: candidate.email,
+          jobTitle: candidate.jobTitle ?? candidate.jobId,
+          invitedAt: candidate.invitedAt,
+          inviteExpiresAt: candidate.inviteExpiresAt,
+          isInviteExpired: candidate.isInviteExpired,
+          submittedAt: candidate.submittedAt,
+        }))
+      : initialHiringStats?.recentInvites ?? [];
   const assessmentCount =
     jobs.length || initialServerAssessmentSummary?.total || dashboardJobs.length;
   const publicJobCount = initialPublicJobs.length;
@@ -411,7 +445,7 @@ export function AdminDashboard({
                 },
                 {
                   label: "Submissions",
-                  value: results.length,
+                  value: results.length || initialHiringStats?.submissions || 0,
                   icon: CheckCircle2,
                 },
                 {
@@ -433,6 +467,73 @@ export function AdminDashboard({
         <div id="assessments" className="space-y-6">
             <Card>
               <CardHeader>
+                <CardTitle>Candidate invites</CardTitle>
+                <CardDescription>
+                  Recent assessment invitations with candidate, job, and expiry status.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-hidden rounded-md border">
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-sm">
+                      <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <tr>
+                          <th className="px-4 py-3 font-medium">Candidate</th>
+                          <th className="px-4 py-3 font-medium">Job</th>
+                          <th className="px-4 py-3 font-medium">Invited</th>
+                          <th className="px-4 py-3 font-medium">Expires</th>
+                          <th className="px-4 py-3 font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {dashboardInvites.map((invite) => (
+                          <tr key={invite.id} className="bg-background">
+                            <td className="px-4 py-3">
+                              <p className="font-medium">{invite.name}</p>
+                              <p className="text-xs text-muted-foreground">{invite.email}</p>
+                            </td>
+                            <td className="px-4 py-3">{invite.jobTitle}</td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(invite.invitedAt)}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(invite.inviteExpiresAt)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge
+                                variant={
+                                  invite.submittedAt
+                                    ? "default"
+                                    : invite.isInviteExpired
+                                      ? "outline"
+                                      : "secondary"
+                                }
+                              >
+                                {invite.submittedAt
+                                  ? "Submitted"
+                                  : invite.isInviteExpired
+                                    ? "Expired"
+                                    : "Active"}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                        {!dashboardInvites.length ? (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                              Candidate assessment invites will appear here.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
                 <CardTitle>Assessments</CardTitle>
                 <CardDescription>
                   Open one assessment to view its own KPIs, graphs, candidates,
@@ -441,7 +542,18 @@ export function AdminDashboard({
               </CardHeader>
               <CardContent className="space-y-3">
                 {dashboardJobs.map((job) => {
-                  const stats = getAssessmentStats(job, candidates, results);
+                  const aggregateStats = initialHiringStats?.assessments[job.id];
+                  const aggregateSubmissions = initialHiringStats?.submissionStats[job.id];
+                  const stats = candidates.length || results.length
+                    ? getAssessmentStats(job, candidates, results)
+                    : {
+                        assignedCandidates: Array.from({ length: aggregateStats?.invited ?? 0 }),
+                        assessmentResults: Array.from({ length: aggregateSubmissions?.submissions ?? 0 }),
+                        averageScore: aggregateSubmissions?.averageScore ?? 0,
+                        completionRate: aggregateStats?.invited
+                          ? Math.round(((aggregateSubmissions?.submissions ?? 0) / aggregateStats.invited) * 100)
+                          : 0,
+                      };
 
                   return (
                     <Link

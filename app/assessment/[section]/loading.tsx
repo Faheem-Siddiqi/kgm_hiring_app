@@ -4,7 +4,7 @@ function SkeletonLine({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-md bg-muted ${className}`} />;
 }
 
-export default function LoadingSection() {
+export default function LoadingAssessmentSection() {
   return (
     <main className="min-h-svh bg-background px-4 py-20 text-foreground sm:px-6 lg:px-8">
       <section className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[0.8fr_1.4fr]">

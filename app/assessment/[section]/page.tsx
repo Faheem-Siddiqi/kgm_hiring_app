@@ -9,7 +9,7 @@ export function generateStaticParams() {
   }));
 }
 
-export default async function SectionPage({
+export default async function AssessmentSectionPage({
   params,
 }: {
   params: Promise<{ section: string }>;

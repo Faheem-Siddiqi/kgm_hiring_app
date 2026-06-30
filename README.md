@@ -39,12 +39,12 @@ This is the candidate sign-in page.
 - Matches the code against candidate invitations stored by the hiring workspace.
 - Stores the active candidate and candidate-authenticated state in browser `localStorage`.
 - Shows success or error notifications.
-- Redirects a valid candidate to `/test`.
+- Redirects a valid candidate to `/assessment`.
 - Provides a link to the hiring-team login at `/admin/login`.
 
-### `/test` - Test Overview
+### `/assessment` - Assessment Overview
 
-**Route file:** `app/test/page.tsx`
+**Route file:** `app/assessment/page.tsx`
 
 **View:** `TestOverview` in `features/test/components/test-overview.tsx`
 
@@ -60,17 +60,17 @@ This page summarizes the active assessment before and between sections.
 - Allows a completed assessment to be reviewed and submitted.
 - Displays a submission confirmation when the full assessment is complete.
 
-### `/test/[section]` - Assessment Section
+### `/assessment/[section]` - Assessment Section
 
-**Route file:** `app/test/[section]/page.tsx`
+**Route file:** `app/assessment/[section]/page.tsx`
 
-**Loading view:** `app/test/[section]/loading.tsx`
+**Loading view:** `app/assessment/[section]/loading.tsx`
 
 **View:** `SectionRunner` in `features/test/components/section-runner.tsx`
 
 **Access:** Candidate flow
 
-**Examples:** `/test/english`, `/test/general`, `/test/admin-mcqs`
+**Examples:** `/assessment/english`, `/assessment/general`, `/assessment/admin-mcqs`
 
 This dynamic route runs one assessment section. The built-in section slugs are generated as static parameters, while the view resolves the active assessment configuration from browser storage.
 

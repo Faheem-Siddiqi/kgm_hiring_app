@@ -70,8 +70,6 @@ function buildShareBody(submission: AssessmentResult) {
     `Answered: ${submission.answeredCount}/${submission.totalQuestions}`,
     `Violations: ${submission.violations.length}`,
     "",
-    submission.adminRemark ? `Admin remark: ${submission.adminRemark}` : "",
-    "",
     `Submission link: ${reviewLink}`,
   ]
     .filter((line, index, lines) => line || lines[index - 1])

@@ -14,6 +14,7 @@ import {
   Settings2,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { AdminNavbar } from "@/components/admin/admin-navbar";
@@ -128,6 +129,7 @@ export function AdminAssessments({
   initialAssessments: PublicAssessment[];
   questionBanks: AssessmentResourceSummary[];
 }) {
+  const router = useRouter();
   const sectionPickerRef = useRef<HTMLDivElement | null>(null);
   const sectionConfigRef = useRef<HTMLDivElement | null>(null);
   const [assessments, setAssessments] = useState(initialAssessments);
@@ -316,6 +318,7 @@ export function AdminAssessments({
     setAssessmentDescription("");
     setSectionConfigOpen(false);
     toast.success(`${result.assessment.code} created.`);
+    router.refresh();
   }
 
   return (

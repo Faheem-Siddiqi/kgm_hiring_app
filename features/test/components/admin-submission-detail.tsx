@@ -23,7 +23,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   type AssessmentResult,
   type JobAssessment,
@@ -36,7 +35,9 @@ import type { PublicAssessment } from "@/lib/assessment-types";
 
 type AdminSnapshot = {
   jobs?: JobAssessment[];
-  results?: AssessmentResult[];
+  submission?: AssessmentResult | null;
+  isLoading: boolean;
+  notFound: boolean;
 };
 
 type SubmissionAction = "accepted" | "rejected" | "forwarded";
@@ -48,29 +49,46 @@ type SubmissionEmailResponse = {
 
 const roman = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
 
-function useAdminData() {
-  const [data, setData] = useState<AdminSnapshot>({});
+function useAdminData(submissionId: string) {
+  const [data, setData] = useState<AdminSnapshot>({
+    isLoading: true,
+    notFound: false,
+  });
 
   useEffect(() => {
     let active = true;
 
     async function loadData() {
+      setData((current) => ({ ...current, isLoading: true, notFound: false }));
+
       try {
-        const [recordsResponse, assessmentsResponse] = await Promise.all([
-          fetch("/api/admin/hiring-records", { cache: "no-store" }),
+        const [submissionResponse, assessmentsResponse] = await Promise.all([
+          fetch(`/api/admin/submissions/${submissionId}`, { cache: "no-store" }),
           fetch("/api/admin/assessments", { cache: "no-store" }),
         ]);
-        const records = (await recordsResponse.json()) as {
+        const submissionData = (await submissionResponse.json()) as {
           message?: string;
-          results?: AssessmentResult[];
+          submission?: AssessmentResult;
         };
         const assessmentData = (await assessmentsResponse.json()) as {
           message?: string;
           assessments?: PublicAssessment[];
         };
 
-        if (!recordsResponse.ok) {
-          throw new Error(records.message ?? "Could not load submissions.");
+        if (submissionResponse.status === 404) {
+          if (active) {
+            setData({
+              jobs: [],
+              submission: null,
+              isLoading: false,
+              notFound: true,
+            });
+          }
+          return;
+        }
+
+        if (!submissionResponse.ok) {
+          throw new Error(submissionData.message ?? "Could not load submission.");
         }
 
         if (!assessmentsResponse.ok) {
@@ -80,7 +98,9 @@ function useAdminData() {
         if (!active) return;
 
         setData({
-          results: records.results ?? [],
+          submission: submissionData.submission ?? null,
+          isLoading: false,
+          notFound: !submissionData.submission,
           jobs: (assessmentData.assessments ?? []).map((assessment) => {
             const sectionTypeConfigs = Object.fromEntries(
               assessment.sectionSettings.map((section) => [
@@ -126,6 +146,9 @@ function useAdminData() {
           }),
         });
       } catch (error) {
+        if (active) {
+          setData((current) => ({ ...current, isLoading: false }));
+        }
         toast.error(error instanceof Error ? error.message : "Could not load submission.");
       }
     }
@@ -135,11 +158,13 @@ function useAdminData() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [submissionId]);
 
   return {
     jobs: data.jobs ?? [],
-    results: data.results ?? [],
+    submission: data.submission ?? null,
+    isLoading: data.isLoading,
+    notFound: data.notFound,
   };
 }
 
@@ -165,11 +190,9 @@ function buildSubmissionLink(submission: AssessmentResult) {
 
 function buildEmailBody({
   submission,
-  remark,
   action,
 }: {
   submission: AssessmentResult;
-  remark: string;
   action: SubmissionAction;
 }) {
   const heading =
@@ -188,20 +211,103 @@ function buildEmailBody({
     `Score: ${submission.score}%`,
     `Status: ${submission.status}`,
     `Answered: ${submission.answeredCount}/${submission.totalQuestions}`,
-    `Violations: ${submission.violations.length}`,
+    `Violations: ${submission.violations?.length ?? 0}`,
     "",
-    `Admin remark: ${remark || "No remark added."}`,
-    "",
-    `Submission link: ${buildSubmissionLink(submission)}`,
+    // `Submission link: ${buildSubmissionLink(submission)}`
+    // ,
   ].join("\n");
 }
 
+function SubmissionDetailSkeleton() {
+  const block = (className: string) => (
+    <div className={`animate-pulse rounded-md bg-muted ${className}`} />
+  );
+
+  return (
+    <main className="min-h-svh bg-background text-foreground">
+      <AdminNavbar />
+      <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-4">
+            {block("h-10 w-40")}
+            {block("h-6 w-36")}
+            {block("h-10 w-72")}
+            {block("h-4 w-[min(560px,80vw)]")}
+            <div className="rounded-md border p-4">
+              {block("h-4 w-44")}
+              {block("mt-3 h-4 w-64")}
+              {block("mt-4 h-16 w-full")}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {block("h-6 w-24")}
+            {block("h-6 w-28")}
+            {block("h-6 w-32")}
+            {block("h-6 w-28")}
+          </div>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+          <Card>
+            <CardHeader className="space-y-3">
+              {block("h-6 w-40")}
+              {block("h-4 w-80")}
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index} className="rounded-md border p-3">
+                    {block("h-4 w-24")}
+                    {block("mt-3 h-3 w-full")}
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-md border p-4">
+                {block("h-5 w-52")}
+                {block("mt-3 h-4 w-72")}
+              </div>
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="rounded-lg border p-4">
+                  {block("h-3 w-24")}
+                  {block("mt-3 h-5 w-11/12")}
+                  {block("mt-5 h-24 w-full")}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <aside className="space-y-6">
+            <Card>
+              <CardHeader className="space-y-3">
+                {block("h-6 w-32")}
+                {block("h-4 w-64")}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {block("h-28 w-full")}
+                {block("h-24 w-full")}
+                {block("h-10 w-full")}
+                {block("h-10 w-full")}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>{block("h-6 w-36")}</CardHeader>
+              <CardContent className="space-y-2">
+                {block("h-16 w-full")}
+                {block("h-16 w-full")}
+              </CardContent>
+            </Card>
+          </aside>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export function AdminSubmissionDetail({ submissionId }: { submissionId: string }) {
-  const { jobs, results } = useAdminData();
+  const { jobs, submission: loadedSubmission, isLoading, notFound } = useAdminData(submissionId);
   const [submissionOverride, setSubmissionOverride] = useState<AssessmentResult | null>(null);
-  const storedSubmission = results.find((result) => result.id === submissionId);
   const submission =
-    submissionOverride?.id === submissionId ? submissionOverride : storedSubmission;
+    submissionOverride?.id === submissionId ? submissionOverride : loadedSubmission;
   const job = submission
     ? jobs.find((item) => item.id === submission.assessmentId)
     : undefined;
@@ -220,13 +326,16 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
     });
   }, [job]);
   const [activeSectionSlug, setActiveSectionSlug] = useState("");
-  const [remark, setRemark] = useState(() => submission?.adminRemark ?? "");
   const [adminEmail, setAdminEmail] = useState("");
   const [sendingAction, setSendingAction] = useState<SubmissionAction | "evaluated" | null>(null);
   const activeSection =
     sections.find((section) => section.slug === activeSectionSlug) ?? sections[0];
 
-  if (!submission) {
+  if (isLoading) {
+    return <SubmissionDetailSkeleton />;
+  }
+
+  if (!submission && notFound) {
     return (
       <main className="min-h-svh bg-background text-foreground">
         <AdminNavbar />
@@ -249,7 +358,32 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
     );
   }
 
+  if (!submission) {
+    return (
+      <main className="min-h-svh bg-background text-foreground">
+        <AdminNavbar />
+        <section className="mx-auto max-w-3xl px-4 py-10">
+          <Card>
+            <CardHeader>
+              <CardTitle>Submission unavailable</CardTitle>
+              <CardDescription>
+                The submission could not be loaded. Please refresh or try again.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild>
+                <Link href="/admin/submissions">Back to submissions</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
+      </main>
+    );
+  }
+
   const submissionRecord = submission;
+  const terminalDecision = submissionRecord.decision;
+  const reviewLocked = Boolean(terminalDecision);
   const textQuestions = sections.flatMap((section) =>
     section.questions.filter((question) => question.type === "text"),
   );
@@ -268,7 +402,6 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
-          remark,
           textScores: updates.textScores,
         }),
       });
@@ -292,10 +425,6 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
     }
   }
 
-  function saveRemarkOnly() {
-    void saveReview("evaluated");
-  }
-
   function updateTextScore(questionId: string, value: string) {
     const score = Math.min(10, Math.max(0, Number(value)));
     void saveReview("evaluated", {
@@ -315,6 +444,11 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
     to: string;
     subject: string;
   }) {
+    if (reviewLocked) {
+      toast.error("This submission already has a final review decision.");
+      return;
+    }
+
     setSendingAction(action);
     const reviewedSubmission = await saveReview(action);
     if (!reviewedSubmission) return;
@@ -326,7 +460,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
         body: JSON.stringify({
           to,
           subject,
-          body: buildEmailBody({ submission: reviewedSubmission, remark, action }),
+          body: buildEmailBody({ submission: reviewedSubmission, action }),
         }),
       });
       const payload = (await response.json()) as SubmissionEmailResponse;
@@ -345,6 +479,11 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
   }
 
   function markEvaluated() {
+    if (reviewLocked) {
+      toast.error("This submission already has a final review decision.");
+      return;
+    }
+
     void saveReview("evaluated");
   }
 
@@ -407,9 +546,6 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                 <p className="mt-1 text-muted-foreground">
                   {submission.evaluatedBy.email}
                 </p>
-                {submission.evaluatedBy.remark ? (
-                  <p className="mt-3 leading-6">{submission.evaluatedBy.remark}</p>
-                ) : null}
               </div>
             ) : null}
           </div>
@@ -496,11 +632,14 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                         question.type === "text"
                           ? []
                           : [...(question.correctAnswers ?? [])].sort();
+                      const hasAnswer = provided.length > 0;
                       const isCorrect =
                         question.type !== "text" &&
+                        hasAnswer &&
                         expected.length > 0 &&
                         expected.length === provided.length &&
                         expected.every((value, answerIndex) => value === provided[answerIndex]);
+
                       return (
                         <div key={question.id} className="rounded-lg border p-4">
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -517,7 +656,9 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                                 ? "Manual text"
                                 : isCorrect
                                   ? "Correct"
-                                  : "Incorrect"}
+                                  : hasAnswer
+                                    ? "Incorrect"
+                                    : "Unattempted"}
                             </Badge>
                           </div>
 
@@ -552,13 +693,17 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                                 const selected = provided.includes(option);
                                 const correct = expected.includes(option);
                                 const optionTone =
-                                  selected && correct
-                                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-800 dark:text-emerald-300"
-                                    : selected
-                                      ? "border-red-500/40 bg-red-500/15 text-red-800 dark:text-red-300"
-                                      : correct
-                                        ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                        : "border-border bg-background text-muted-foreground";
+                                  !hasAnswer
+                                    ? correct
+                                      ? "border-primary/40 bg-primary/10 text-primary"
+                                      : "border-border bg-background text-muted-foreground"
+                                    : selected && correct
+                                      ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-800 dark:text-emerald-300"
+                                      : selected
+                                        ? "border-red-500/40 bg-red-500/15 text-red-800 dark:text-red-300"
+                                        : correct
+                                          ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                          : "border-border bg-background text-muted-foreground";
 
                                 return (
                                   <div
@@ -567,13 +712,17 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                                   >
                                     <span className="font-medium">{option}</span>
                                     <span className="ml-2 text-xs">
-                                      {selected && correct
-                                        ? "Selected - correct"
-                                        : selected
-                                          ? "Selected - incorrect"
-                                          : correct
-                                            ? "Correct answer"
-                                            : "Not selected"}
+                                      {!hasAnswer
+                                        ? correct
+                                          ? "Correct answer"
+                                          : "Unattempted"
+                                        : selected && correct
+                                          ? "Selected"
+                                          : selected
+                                            ? "Selected"
+                                            : correct
+                                              ? ""
+                                              : ""}
                                     </span>
                                   </div>
                                 );
@@ -598,7 +747,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
               <CardHeader>
                 <CardTitle>Review actions</CardTitle>
                 <CardDescription>
-                  Save remark, mark evaluation, and send candidate/admin emails.
+                  Mark evaluation, send the final candidate email, or forward to another admin.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -619,58 +768,45 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="admin-remark">Admin remark</Label>
-                  <Textarea
-                    id="admin-remark"
-                    value={remark}
-                    onChange={(event) => setRemark(event.target.value)}
-                    placeholder="Write remark included in emails..."
-                  />
-                  <Button type="button" variant="outline" onClick={saveRemarkOnly}>
-                    Save remark
-                  </Button>
-                </div>
-
                 <Button
                   type="button"
                   className="w-full"
                   onClick={markEvaluated}
-                  disabled={Boolean(sendingAction)}
+                  disabled={Boolean(sendingAction) || reviewLocked}
                 >
                   {sendingAction === "evaluated" ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
                     <CheckCircle2 className="size-4" />
                   )}
-                  Mark evaluated
+                  {submission.evaluatedAt ? "Evaluated" : "Mark evaluated"}
                 </Button>
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                   <Button
                     type="button"
                     variant="outline"
                     onClick={sendAcceptanceEmail}
-                    disabled={Boolean(sendingAction)}
+                    disabled={Boolean(sendingAction) || reviewLocked}
                   >
                     {sendingAction === "accepted" ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (
                       <Send className="size-4" />
                     )}
-                    Acceptance email
+                    {terminalDecision === "accepted" ? "Accepted" : "Acceptance email"}
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
                     onClick={sendRejectionEmail}
-                    disabled={Boolean(sendingAction)}
+                    disabled={Boolean(sendingAction) || reviewLocked}
                   >
                     {sendingAction === "rejected" ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (
                       <Mail className="size-4" />
                     )}
-                    Rejection email
+                    {terminalDecision === "rejected" ? "Rejected" : "Rejection email"}
                   </Button>
                 </div>
 
@@ -688,14 +824,14 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                     variant="outline"
                     className="w-full"
                     onClick={forwardToAdmin}
-                    disabled={Boolean(sendingAction)}
+                    disabled={Boolean(sendingAction) || reviewLocked}
                   >
                     {sendingAction === "forwarded" ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (
                       <Mail className="size-4" />
                     )}
-                    Forward with remark
+                    {terminalDecision === "forwarded" ? "Forwarded" : "Forward to admin"}
                   </Button>
                 </div>
               </CardContent>

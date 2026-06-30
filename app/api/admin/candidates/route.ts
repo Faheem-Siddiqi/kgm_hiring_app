@@ -43,19 +43,29 @@ export const POST = withErrorHandler(async (request: Request) => {
     name?: string;
     email?: string;
     assessmentId?: string;
+    jobId?: string;
+    inviteExpiresAt?: string;
   };
   const name = body.name?.trim() ?? "";
   const email = body.email?.trim() ?? "";
   const assessmentId = body.assessmentId?.trim() ?? "";
+  const jobId = body.jobId?.trim() ?? "";
+  const inviteExpiresAt = body.inviteExpiresAt?.trim();
 
-  if (!name || !email || !assessmentId) {
+  if (!name || !email || (!assessmentId && !jobId)) {
     return NextResponse.json(
-      { message: "Candidate name, email, and assessment are required." },
+      { message: "Candidate name, email, and assessment or job are required." },
       { status: 400 },
     );
   }
 
-  const result = await createAssessmentCandidate({ name, email, assessmentId });
+  const result = await createAssessmentCandidate({
+    name,
+    email,
+    assessmentId,
+    jobId,
+    inviteExpiresAt,
+  });
   const canViewOtp = canViewCandidateInviteOtp(session.user);
 
   return NextResponse.json({

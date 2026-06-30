@@ -41,6 +41,13 @@ type CandidateInviteResponse = {
 };
 
 const CANDIDATES_PER_PAGE = 8;
+const DEFAULT_INVITE_EXPIRY_DAYS = 7;
+
+function defaultInviteExpiryInputValue() {
+  return new Date(Date.now() + DEFAULT_INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
 
 function parseAdminSnapshot(snapshot: string) {
   try {
@@ -142,9 +149,10 @@ export function AdminJobDetail({
   const [responsibilities, setResponsibilities] = useState(job.responsibilities.join("\n"));
   const [requirements, setRequirements] = useState(job.requirements.join("\n"));
   const [assessmentIds, setAssessmentIds] = useState(job.assessmentIds);
+  const [currentStatus, setCurrentStatus] = useState(job.status);
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
-  const [inviteAssessmentId, setInviteAssessmentId] = useState(job.assessmentIds[0] ?? "");
+  const [inviteExpiryDate, setInviteExpiryDate] = useState(defaultInviteExpiryInputValue);
   const [candidateSearch, setCandidateSearch] = useState("");
   const [candidatePage, setCandidatePage] = useState(1);
   const [existingInvite, setExistingInvite] = useState<{
@@ -154,17 +162,29 @@ export function AdminJobDetail({
   const [saving, setSaving] = useState(false);
   const [sendingInvite, setSendingInvite] = useState(false);
   const [resendingExistingInvite, setResendingExistingInvite] = useState(false);
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [reopeningJob, setReopeningJob] = useState(false);
   const { candidates, results, canViewCandidateOtp, refresh } = useAdminData();
   const jobCandidates = useMemo(
-    () => candidates.filter((candidate) => job.assessmentIds.includes(candidate.jobId)),
-    [candidates, job.assessmentIds],
+    () =>
+      candidates.filter((candidate) =>
+        candidate.jobAssignmentId === job.id ||
+        job.assessmentIds.includes(candidate.jobId) ||
+        candidate.assessmentIds?.some((id) => job.assessmentIds.includes(id)),
+      ),
+    [candidates, job.id, job.assessmentIds],
   );
   const jobResults = useMemo(
     () => results.filter((result) => job.assessmentIds.includes(result.assessmentId)),
     [job.assessmentIds, results],
   );
-  const completionRate = jobCandidates.length
-    ? Math.round((jobResults.length / jobCandidates.length) * 100)
+  const expectedSubmissions = jobCandidates.reduce(
+    (total, candidate) =>
+      total + (candidate.assessmentIds?.filter((id) => job.assessmentIds.includes(id)).length || 1),
+    0,
+  );
+  const completionRate = expectedSubmissions
+    ? Math.round((jobResults.length / expectedSubmissions) * 100)
     : 0;
   const filteredJobCandidates = useMemo(() => {
     const query = candidateSearch.trim().toLowerCase();
@@ -172,14 +192,19 @@ export function AdminJobDetail({
     if (!query) return jobCandidates;
 
     return jobCandidates.filter((candidate) => {
-      const assessment = job.assessments.find((item) => item.id === candidate.jobId);
+      const candidateAssessmentIds = candidate.assessmentIds?.length
+        ? candidate.assessmentIds
+        : [candidate.jobId];
+      const candidateAssessments = job.assessments.filter((item) =>
+        candidateAssessmentIds.includes(item.id),
+      );
 
       return [
         candidate.name,
         candidate.email,
         candidate.inviteEmailStatus ?? "sent",
-        assessment?.code ?? "",
-        assessment?.name ?? "",
+        candidate.jobTitle ?? "",
+        ...candidateAssessments.flatMap((assessment) => [assessment.code, assessment.name]),
       ].some((value) => value.toLowerCase().includes(query));
     });
   }, [candidateSearch, job.assessments, jobCandidates]);
@@ -196,7 +221,7 @@ export function AdminJobDetail({
     { label: "Candidates", value: jobCandidates.length, icon: Users },
     { label: "Completed", value: `${completionRate}%`, icon: CheckCircle2 },
     { label: "Assessments", value: job.assessments.length, icon: ClipboardList },
-    { label: "Status", value: job.status, icon: ClipboardList },
+    { label: "Status", value: currentStatus, icon: ClipboardList },
   ];
 
   function buildCandidateLink(candidate: Candidate) {
@@ -225,7 +250,7 @@ export function AdminJobDetail({
         department,
         location,
         experience,
-        status: job.status,
+        status: currentStatus,
         summary: description,
         description,
         responsibilities: splitList(responsibilities),
@@ -283,26 +308,39 @@ export function AdminJobDetail({
 
   async function sendInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const assessment = job.assessments.find((item) => item.id === inviteAssessmentId);
-    if (!candidateName.trim() || !candidateEmail.trim() || !assessment) {
-      toast.error("Candidate name, email, and assessment are required.");
+    if (currentStatus === "closed" || currentStatus === "paused") {
+      toast.error(`This job is ${currentStatus}. Reopen the job before inviting candidates.`);
+      setStatusModalOpen(true);
       return;
     }
 
-    upsertJobAssessment(runtimeAssessmentFromJob(job, assessment));
+    if (!candidateName.trim() || !candidateEmail.trim() || !job.assessments.length) {
+      toast.error("Candidate name, email, and at least one job assessment are required.");
+      return;
+    }
+
+    job.assessments.forEach((assessment) => {
+      upsertJobAssessment(runtimeAssessmentFromJob(job, assessment));
+    });
     setSendingInvite(true);
     let response: Response;
     let payload: CandidateInviteResponse;
     let candidate: Candidate | null = null;
 
     try {
-      const assignment = await createCandidateRecord(candidateName.trim(), candidateEmail.trim(), assessment.id);
+      const assignment = await createCandidateRecord(
+        candidateName.trim(),
+        candidateEmail.trim(),
+        job.id,
+        "job",
+        inviteExpiryDate,
+      );
       candidate = assignment.candidate;
 
       if (assignment.existingPending) {
         setExistingInvite({
           candidate,
-          assessmentTitle: `${job.title} - ${assessment.name}`,
+          assessmentTitle: job.title,
         });
         await refresh();
         setSendingInvite(false);
@@ -314,7 +352,7 @@ export function AdminJobDetail({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           candidateId: candidate.id,
-          assessmentTitle: `${job.title} - ${assessment.name}`,
+          assessmentTitle: job.title,
         }),
       });
       payload = (await response.json()) as CandidateInviteResponse;
@@ -352,6 +390,7 @@ export function AdminJobDetail({
     await refresh();
     setCandidateName("");
     setCandidateEmail("");
+    setInviteExpiryDate(defaultInviteExpiryInputValue());
     setCandidateSearch("");
     setCandidatePage(1);
     toast.success(`Invite email sent to ${candidate.email}.`);
@@ -371,18 +410,75 @@ export function AdminJobDetail({
       setExistingInvite(null);
       setCandidateName("");
       setCandidateEmail("");
+      setInviteExpiryDate(defaultInviteExpiryInputValue());
+    }
+  }
+
+  async function reopenJobFromModal() {
+    setReopeningJob(true);
+    try {
+      const response = await fetch("/api/admin/jobs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.id, status: "reopened" }),
+      });
+      const payload = (await response.json()) as { message?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.message ?? "Could not reopen job.");
+      }
+
+      setCurrentStatus("reopened");
+      setStatusModalOpen(false);
+      toast.success("Job reopened. You can invite candidates now.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not reopen job.");
+    } finally {
+      setReopeningJob(false);
     }
   }
 
   return (
     <main className="min-h-svh bg-background text-foreground">
       <AdminNavbar />
+      <Dialog open={statusModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Job is not open</DialogTitle>
+            <DialogDescription>
+              This job is currently {currentStatus}. Reopen the job before sending
+              candidate invitations for its assessments.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/20 p-4 text-sm">
+            Candidate invites are blocked while a job is paused or closed.
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={reopeningJob}
+              onClick={() => setStatusModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={reopeningJob}
+              onClick={() => void reopenJobFromModal()}
+            >
+              {reopeningJob ? <Loader2 className="size-4 animate-spin" /> : null}
+              Reopen job
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(existingInvite)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Existing active invitation</DialogTitle>
             <DialogDescription>
-              This candidate already has an active invitation for this job assessment.
+              This candidate already has an active invitation for this job.
               A new assignment was not created. You can resend the email using the
               existing invitation.
             </DialogDescription>
@@ -398,6 +494,10 @@ export function AdminJobDetail({
                 OTP is reused from the active invitation and is not shown here.
                 If email fails, manual OTP visibility is limited to HOD and IT
                 personnel only.
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">Expires</span>
+                <p className="font-medium">{formatDate(existingInvite.candidate.inviteExpiresAt)}</p>
               </div>
             </div>
           ) : null}
@@ -534,17 +634,12 @@ export function AdminJobDetail({
             <Card>
               <CardHeader>
                 <CardTitle>Invite candidate</CardTitle>
-                <CardDescription>Choose the assessment connected to this job.</CardDescription>
+                <CardDescription>One invitation opens every assessment assigned to this job.</CardDescription>
               </CardHeader>
               <CardContent>
                 <form className="space-y-3" onSubmit={sendInvite}>
-                  <div className="space-y-2">
-                    <Label htmlFor="invite-assessment">Assessment</Label>
-                    <select id="invite-assessment" className="h-10 w-full rounded-md border bg-background px-3 text-sm shadow-xs outline-none" value={inviteAssessmentId} onChange={(event) => setInviteAssessmentId(event.target.value)}>
-                      {job.assessments.map((assessment) => (
-                        <option key={assessment.id} value={assessment.id}>{assessment.code} · {assessment.name}</option>
-                      ))}
-                    </select>
+                  <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+                    The candidate will see {job.assessments.length} assessment{job.assessments.length === 1 ? "" : "s"} after login and can complete them one by one.
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-2">
@@ -555,6 +650,16 @@ export function AdminJobDetail({
                       <Label htmlFor="candidate-email">Email</Label>
                       <Input id="candidate-email" type="email" value={candidateEmail} onChange={(event) => setCandidateEmail(event.target.value)} />
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="invite-expiry">Invitation expiry</Label>
+                    <Input
+                      id="invite-expiry"
+                      type="date"
+                      value={inviteExpiryDate}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={(event) => setInviteExpiryDate(event.target.value)}
+                    />
                   </div>
                   <Button type="submit" className="w-full" disabled={!job.assessments.length || sendingInvite}>
                     {sendingInvite ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
@@ -612,18 +717,29 @@ export function AdminJobDetail({
                       <th className="px-4 py-3 font-medium">Candidate</th>
                       <th className="px-4 py-3 font-medium">Assessment</th>
                       <th className="px-4 py-3 font-medium">Invite</th>
+                      <th className="px-4 py-3 font-medium">Expiry</th>
                       <th className="px-4 py-3 font-medium">Submitted</th>
                       <th className="px-4 py-3 text-right font-medium">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {paginatedCandidates.map((candidate) => {
-                      const result = jobResults.find((item) =>
+                      const candidateAssessmentIds = candidate.assessmentIds?.length
+                        ? candidate.assessmentIds.filter((id) => job.assessmentIds.includes(id))
+                        : [candidate.jobId];
+                      const candidateResults = jobResults.filter((item) =>
                         item.candidateId
                           ? item.candidateId === candidate.id
-                          : item.candidateEmail === candidate.email && item.assessmentId === candidate.jobId,
+                          : item.candidateEmail === candidate.email && candidateAssessmentIds.includes(item.assessmentId),
                       );
-                      const assessment = job.assessments.find((item) => item.id === candidate.jobId);
+                      const latestResult = candidateResults[0];
+                      const pendingAssessmentId =
+                        candidateAssessmentIds.find(
+                          (id) => !candidateResults.some((result) => result.assessmentId === id),
+                        ) ?? candidateAssessmentIds[0];
+                      const candidateAssessments = job.assessments.filter((item) =>
+                        candidateAssessmentIds.includes(item.id),
+                      );
                       const emailFailed = candidate.inviteEmailStatus === "failed";
 
                       return (
@@ -674,8 +790,10 @@ export function AdminJobDetail({
                             ) : null}
                           </td>
                           <td className="px-4 py-3">
-                            <p className="font-medium">{assessment?.code ?? "Assessment"}</p>
-                            <p className="text-xs text-muted-foreground">{assessment?.name ?? candidate.jobId}</p>
+                            <p className="font-medium">{candidate.jobTitle ?? job.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {candidateAssessments.map((assessment) => assessment.code).join(", ") || pendingAssessmentId}
+                            </p>
                           </td>
                           <td className="px-4 py-3">
                             <Badge
@@ -691,20 +809,30 @@ export function AdminJobDetail({
                             <p className="mt-1 text-xs text-muted-foreground">{formatDate(candidate.invitedAt)}</p>
                           </td>
                           <td className="px-4 py-3">
-                            {result ? (
+                            <Badge variant={candidate.isInviteExpired ? "outline" : "secondary"}>
+                              {candidate.isInviteExpired ? "Expired" : "Active"}
+                            </Badge>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatDate(candidate.inviteExpiresAt)}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3">
+                            {candidateResults.length ? (
                               <>
-                                <Badge variant="secondary">Submitted</Badge>
-                                <p className="mt-1 text-xs text-muted-foreground">{formatDate(result.submittedAt)}</p>
+                                <Badge variant="secondary">
+                                  {candidateResults.length}/{candidateAssessmentIds.length} submitted
+                                </Badge>
+                                <p className="mt-1 text-xs text-muted-foreground">{formatDate(candidateResults[0].submittedAt)}</p>
                               </>
                             ) : (
                               <Badge variant="outline">Waiting</Badge>
                             )}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <Button asChild variant={result ? "default" : "outline"} size="sm">
-                              <Link href={result ? `/admin/submissions/${result.id}` : `/admin/assessment/${candidate.jobId}`}>
-                                {result ? <Eye className="size-4" /> : <Send className="size-4" />}
-                                {result ? `Open (${result.score}%)` : "Waiting"}
+                            <Button asChild variant={latestResult ? "default" : "outline"} size="sm">
+                              <Link href={latestResult ? `/admin/submissions/${latestResult.id}` : `/admin/assessment/${pendingAssessmentId}`}>
+                                {latestResult ? <Eye className="size-4" /> : <Send className="size-4" />}
+                                {latestResult ? `Open (${latestResult.score}%)` : "Waiting"}
                               </Link>
                             </Button>
                           </td>
@@ -713,7 +841,7 @@ export function AdminJobDetail({
                     })}
                     {!paginatedCandidates.length ? (
                       <tr>
-                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
                           {jobCandidates.length
                             ? "No candidates match your search."
                             : "Invited candidates for this job will appear here."}

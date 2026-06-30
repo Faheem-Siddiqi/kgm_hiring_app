@@ -350,6 +350,33 @@ export async function getJobBySlug(slug: string, options: { includeInactive?: bo
   return job ? toPublicJob(job) : null;
 }
 
+export async function getJobById(jobId: string, options: { includeInactive?: boolean } = {}) {
+  if (!ObjectId.isValid(jobId)) return null;
+
+  const jobs = await getJobCollection();
+  const [job] = await jobs
+    .aggregate<JobAggregateDocument>([
+      {
+        $match: {
+          _id: new ObjectId(jobId),
+          ...(options.includeInactive ? {} : { status: { $in: ["open", "reopened"] } }),
+        },
+      },
+      {
+        $lookup: {
+          from: "assessments",
+          localField: "assessmentIds",
+          foreignField: "_id",
+          as: "assessments",
+        },
+      },
+      { $limit: 1 },
+    ])
+    .toArray();
+
+  return job ? toPublicJob(job) : null;
+}
+
 export async function createJob(input: ReturnType<typeof parseJobInput>) {
   await assertAssessmentsExist(input.assessmentIds);
   const jobs = await getJobCollection();

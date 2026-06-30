@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   ArrowRight,
   CheckCircle2,
   Clock3,
   FileText,
   ListChecks,
+  LogOut,
   Send,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,8 +35,12 @@ import { enterAssessmentFullscreen } from "@/features/test/assessment-fullscreen
 import {
   readActiveAssessmentSections,
   readActiveJobAssessment,
+  readAssessmentResults,
+  readCandidates,
+  readJobAssessments,
   saveAssessmentResult,
   subscribeToAdminData,
+  writeActiveJobAssessment,
 } from "@/features/test/admin-storage";
 import {
   getAnsweredCount,
@@ -76,6 +81,30 @@ export function TestOverview() {
   );
   const answers = JSON.parse(answersSnapshot) as Record<string, string>;
   const activeAssessment = readActiveJobAssessment();
+  const activeCandidateId =
+    typeof window === "undefined"
+      ? null
+      : window.localStorage.getItem("kgm-hiring-active-candidate-id");
+  const activeCandidate = readCandidates().find((candidate) => candidate.id === activeCandidateId);
+  const submittedAssessmentIds = new Set(
+    readAssessmentResults()
+      .filter((result) => result.candidateId === activeCandidateId)
+      .map((result) => result.assessmentId),
+  );
+  const candidateAssessmentIds = activeCandidate?.assessmentIds?.length
+    ? activeCandidate.assessmentIds
+    : activeCandidate?.jobId
+      ? [activeCandidate.jobId]
+      : [];
+  const candidateAssessments = readJobAssessments().filter((assessment) =>
+    candidateAssessmentIds.includes(assessment.id),
+  );
+  const pendingCandidateAssessments = candidateAssessments.filter(
+    (assessment) => !submittedAssessmentIds.has(assessment.id),
+  );
+  const activeAssessmentSubmitted = activeAssessment
+    ? submittedAssessmentIds.has(activeAssessment.id)
+    : false;
   const assessmentSections = readActiveAssessmentSections();
   const totalQuestions = getTotalQuestionCount();
   const answeredQuestions = getAnsweredCount(
@@ -98,7 +127,30 @@ export function TestOverview() {
     }
   }
 
-  if (!activeAssessment) {
+  function openAssessment(assessmentId: string) {
+    writeActiveJobAssessment(assessmentId);
+    window.localStorage.removeItem("kgm-hiring-assessment-answers");
+    window.dispatchEvent(new Event("kgm-hiring-assessment-answers-change"));
+  }
+
+  useEffect(() => {
+    if (activeAssessmentSubmitted && pendingCandidateAssessments[0]) {
+      openAssessment(pendingCandidateAssessments[0].id);
+    }
+  });
+
+  function logoutCandidate() {
+    window.localStorage.removeItem("kgm-hiring-authenticated");
+    window.localStorage.removeItem("kgm-hiring-active-candidate-id");
+    window.localStorage.removeItem("kgm-hiring-active-assessment-id");
+    window.localStorage.removeItem("kgm-hiring-assessment-answers");
+    window.location.assign("/");
+  }
+
+  const canLogoutAndResumeLater =
+    candidateAssessmentIds.length > 1 && pendingCandidateAssessments.length > 0;
+
+  if (!activeAssessment || !activeCandidate) {
     return (
       <section className="mx-auto w-full max-w-3xl px-4 py-16">
         <Card>
@@ -134,15 +186,51 @@ export function TestOverview() {
           </Badge>
           <div className="max-w-3xl space-y-3">
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-              {activeAssessment.role}
+              {activeCandidate?.jobTitle ?? activeAssessment.role}
             </h1>
             <p className="text-base leading-7 text-muted-foreground sm:text-lg">
-              Complete each section in order. Your responses are saved as you
-              work and your progress updates automatically.
+              Pick an assigned assessment, complete it, and return here for the
+              remaining assessments whenever you are ready.
             </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {candidateAssessments.map((assessment) => {
+              const isSubmitted = submittedAssessmentIds.has(assessment.id);
+              const isActive = activeAssessment.id === assessment.id;
+
+              return (
+                <Button
+                  key={assessment.id}
+                  type="button"
+                  variant={isActive ? "default" : "outline"}
+                  disabled={isSubmitted}
+                  onClick={() => openAssessment(assessment.id)}
+                >
+                  {assessment.title}
+                  {isSubmitted ? <CheckCircle2 className="size-4" /> : null}
+                </Button>
+              );
+            })}
+            {canLogoutAndResumeLater ? (
+              <Button type="button" variant="outline" onClick={logoutCandidate}>
+                <LogOut className="size-4" />
+                Logout
+              </Button>
+            ) : null}
           </div>
         </div>
 
+        {activeAssessmentSubmitted ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Assessment completed</CardTitle>
+              <CardDescription>
+                This assessment is already submitted and cannot be opened again.
+                Choose another pending assessment above.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ) : (
         <Card>
           <CardHeader className="gap-3">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -168,7 +256,7 @@ export function TestOverview() {
               return (
                 <Link
                   className="block rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                  href={`/test/${section.slug}`}
+                  href={`/assessment/${section.slug}`}
                   key={section.slug}
                   onClick={() => {
                     setIsOpeningSection(true);
@@ -226,6 +314,7 @@ export function TestOverview() {
             </div>
           </CardContent>
         </Card>
+        )}
       </div>
 
       <aside className="space-y-6">
@@ -271,8 +360,9 @@ export function TestOverview() {
             </div>
             <DialogTitle>Test submitted</DialogTitle>
             <DialogDescription>
-              Thanks for submitting your assessment. Your access code has now
-              been closed.
+              {pendingCandidateAssessments.length
+                ? "Assessment completed. You can return to the main page and open any remaining assessment assigned to this job."
+                : "All assessments assigned to this job are completed. This OTP is now closed."}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md border bg-muted/30 p-4 text-sm">
@@ -281,8 +371,17 @@ export function TestOverview() {
             saved answers.
           </div>
           <DialogFooter>
-            <Button onClick={() => window.location.assign("/")}>
-              OK
+            <Button
+              onClick={() => {
+                if (pendingCandidateAssessments.length) {
+                  setShowCompletionDialog(false);
+                  return;
+                }
+
+                window.location.assign("/");
+              }}
+            >
+              {pendingCandidateAssessments.length ? "Back to assessments" : "Finish"}
             </Button>
           </DialogFooter>
         </DialogContent>

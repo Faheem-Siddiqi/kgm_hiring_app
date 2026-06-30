@@ -44,6 +44,8 @@ import {
   createViolation,
   readActiveAssessmentSections,
   readActiveJobAssessment,
+  readAssessmentResults,
+  readCandidates,
   subscribeToAdminData,
   saveAssessmentResult,
 } from "@/features/test/admin-storage";
@@ -154,6 +156,19 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   );
   const answers = JSON.parse(answersSnapshot) as Record<string, string>;
   const activeAssessment = readActiveJobAssessment();
+  const activeCandidateId =
+    typeof window === "undefined"
+      ? null
+      : window.localStorage.getItem("kgm-hiring-active-candidate-id");
+  const activeCandidate = readCandidates().find((candidate) => candidate.id === activeCandidateId);
+  const activeAssessmentSubmitted = Boolean(
+    activeAssessment &&
+      readAssessmentResults().some(
+        (result) =>
+          result.candidateId === activeCandidateId &&
+          result.assessmentId === activeAssessment.id,
+      ),
+  );
   const activeSections = readActiveAssessmentSections();
   const section =
     activeSections.find((item) => item.slug === sectionSlug) ??
@@ -433,14 +448,14 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   }, [currentQuestion.id, isLastQuestion, isQuestionTimeUp, isTimeUp, questionRemainingStorageKey, questionTimerStorageKey]);
 
   useEffect(() => {
-    router.prefetch("/test");
+    router.prefetch("/assessment");
 
     if (previousSectionSlug) {
-      router.prefetch(`/test/${previousSectionSlug}`);
+      router.prefetch(`/assessment/${previousSectionSlug}`);
     }
 
     if (nextSectionSlug) {
-      router.prefetch(`/test/${nextSectionSlug}`);
+      router.prefetch(`/assessment/${nextSectionSlug}`);
     }
   }, [nextSectionSlug, previousSectionSlug, router]);
 
@@ -490,11 +505,11 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     isStoppingAssessmentRef.current = true;
     setShowWindowWarning(false);
     await exitAssessmentFullscreen();
-    router.replace("/test");
+    router.replace("/assessment");
   }
 
   function leaveTimedOutSection() {
-    router.replace("/test");
+    router.replace("/assessment");
   }
 
   function resetSectionTimer() {
@@ -507,7 +522,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
 
   function finishSubmittedAssessment() {
     setShowCompletionDialog(false);
-    router.replace("/");
+    router.replace("/assessment");
   }
 
   function readQuestionAloud() {
@@ -535,6 +550,62 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
 
     windowWarningQueuedRef.current = false;
     setShowWindowWarning(false);
+  }
+
+  if (showCompletionDialog) {
+    return (
+      <Dialog open={showCompletionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-emerald-600 text-white">
+              <CheckCircle2 className="size-5" />
+            </div>
+            <DialogTitle>Test submitted</DialogTitle>
+            <DialogDescription>
+              {submissionStatus === "Auto submitted"
+                ? "This assessment was submitted automatically after 3 fullscreen violations."
+                : "This assessment has been submitted. You will return to the assessment overview."}
+            </DialogDescription>
+          </DialogHeader>
+          {submissionStatus === "Auto submitted" ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+              Assessment terminated after violation :03.
+            </div>
+          ) : null}
+          <div className="rounded-md border bg-muted/30 p-4 text-sm">
+            <span className="font-medium">{totalAnsweredCount}</span> of{" "}
+            <span className="font-medium">{totalQuestionCount}</span> questions
+            have saved answers.
+          </div>
+          <DialogFooter>
+            <Button onClick={finishSubmittedAssessment}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  if (!activeCandidate || activeAssessmentSubmitted) {
+    return (
+      <main className="min-h-svh bg-background px-4 py-20 text-foreground sm:px-6 lg:px-8">
+        <section className="mx-auto w-full max-w-3xl">
+          <Card>
+            <CardHeader>
+              <CardTitle>Assessment unavailable</CardTitle>
+              <CardDescription>
+                This assessment is already submitted or no active candidate
+                session is available.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild>
+                <Link href="/assessment">Back to assessment overview</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -687,7 +758,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
           <div className="space-y-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <Button asChild variant="outline">
-                <Link href="/test">
+                <Link href="/assessment">
                   <ArrowLeft className="size-4" />
                   All sections
                 </Link>
@@ -831,7 +902,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                       hasCurrentAnswer ? (
                         <Button asChild>
                           <Link
-                            href={`/test/${nextSectionSlug}`}
+                            href={`/assessment/${nextSectionSlug}`}
                             onClick={() => {
                               pauseCurrentQuestionTimer();
                               setIsChangingSection(true);
@@ -868,7 +939,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                 {previousSectionSlug ? (
                   <Button asChild variant="ghost">
                     <Link
-                      href={`/test/${previousSectionSlug}`}
+                      href={`/assessment/${previousSectionSlug}`}
                       onClick={() => setIsChangingSection(true)}
                     >
                       <ArrowLeft className="size-4" />
@@ -939,8 +1010,8 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             <DialogTitle>Test submitted</DialogTitle>
             <DialogDescription>
               {submissionStatus === "Auto submitted"
-                ? "The assessment was submitted automatically after 3 fullscreen violations."
-                : "Thanks for submitting your assessment. Your access code has now been closed."}
+                ? "This assessment was submitted automatically after 3 fullscreen violations."
+                : "This assessment has been submitted. You will return to the assessment overview."}
             </DialogDescription>
           </DialogHeader>
           {submissionStatus === "Auto submitted" ? (

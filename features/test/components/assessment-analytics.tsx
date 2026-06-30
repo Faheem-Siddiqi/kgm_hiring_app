@@ -31,7 +31,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { Textarea } from "@/components/ui/textarea";
 import {
   createCandidateRecord,
   fetchAdminDataSnapshot,
@@ -176,7 +175,6 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
   const [settingsDraft, setSettingsDraft] = useState<Record<string, SectionQuestionTypeConfig>>({});
   const [savedSettings, setSavedSettings] = useState<Record<string, SectionQuestionTypeConfig>>({});
   const [settingsDirty, setSettingsDirty] = useState(false);
-  const [reviewRemark, setReviewRemark] = useState("");
   const [forwardAdminEmail, setForwardAdminEmail] = useState("");
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isSendingInvite, setIsSendingInvite] = useState(false);
@@ -291,18 +289,6 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
       cancelled = true;
     };
   }, [assessmentId, resourceSummary, storedSettingsSnapshot]);
-
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      setReviewRemark(selectedSubmission?.adminRemark ?? "");
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedSubmission?.adminRemark, selectedSubmission?.id]);
 
   async function copyText(value: string, successMessage: string) {
     try {
@@ -428,7 +414,6 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action,
-        remark: reviewRemark,
         textScores: updates.textScores,
       }),
     });
@@ -455,15 +440,6 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
     }).catch((error) =>
       toast.error(error instanceof Error ? error.message : "Review could not be saved."),
     );
-  }
-
-  function saveRemark() {
-    if (!selectedSubmission) return;
-    void saveSubmissionReview("evaluated")
-      .then(() => toast.success("Review remark saved"))
-      .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Review could not be saved."),
-      );
   }
 
   function markEvaluated() {
@@ -505,7 +481,7 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
     );
     const reviewLink = `${window.location.origin}/admin/submissions/${selectedSubmission.id}`;
     const subject = `Candidate review requested - ${selectedSubmission.candidateName}`;
-    const body = `Please review this candidate:%0D%0A%0D%0AName: ${selectedSubmission.candidateName}%0D%0AScore: ${selectedSubmission.score}%25%0D%0ALink: ${reviewLink}%0D%0A%0D%0ARemark: ${encodeURIComponent(reviewRemark || "No remark added.")}`;
+    const body = `Please review this candidate:%0D%0A%0D%0AName: ${selectedSubmission.candidateName}%0D%0AScore: ${selectedSubmission.score}%25%0D%0ALink: ${reviewLink}`;
     window.location.href = `mailto:${forwardAdminEmail.trim()}?subject=${encodeURIComponent(subject)}&body=${body}`;
   }
 
@@ -554,7 +530,7 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
             </div>
           </div>
           <Button asChild>
-            <Link href="/test">
+            <Link href="/assessment">
               Candidate test
               <ExternalLink className="size-4" />
             </Link>
@@ -1001,14 +977,11 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                 </div>
                 <div className="rounded-md border p-4">
                   <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_260px]">
-                    <div className="space-y-2">
-                      <Label htmlFor="review-remark">Admin remark</Label>
-                      <Textarea
-                        id="review-remark"
-                        value={reviewRemark}
-                        onChange={(event) => setReviewRemark(event.target.value)}
-                        placeholder="Write review notes for this candidate..."
-                      />
+                    <div>
+                      <p className="text-sm font-medium">Review actions</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Mark evaluation, send a final candidate email, or forward this submission to another admin.
+                      </p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="forward-admin">Forward to admin</Label>
@@ -1019,14 +992,9 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                         onChange={(event) => setForwardAdminEmail(event.target.value)}
                         placeholder="admin@example.com"
                       />
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button type="button" variant="outline" onClick={saveRemark}>
-                          Save remark
-                        </Button>
-                        <Button type="button" variant="outline" onClick={forwardToAdmin}>
-                          Forward
-                        </Button>
-                      </div>
+                      <Button type="button" variant="outline" className="w-full" onClick={forwardToAdmin}>
+                        Forward
+                      </Button>
                     </div>
                   </div>
                   {isEvaluating ? (

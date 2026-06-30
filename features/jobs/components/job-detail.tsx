@@ -17,7 +17,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { JobAssessmentButton } from "@/features/jobs/components/job-assessment-button";
 import type { PublicJob } from "@/lib/job-types";
 
 function formatDate(value: string) {
@@ -39,14 +38,9 @@ export function JobDetail({ job }: { job: PublicJob }) {
             </span>
             <span className="truncate">KGM Careers</span>
           </Link>
-          <JobAssessmentButton
-            jobTitle={job.title}
-            resourceId={primaryAssessment?.questionBankId ?? ""}
-            className="shrink-0"
-            label="Attempt assessment"
-            size="sm"
-            disabled={!primaryAssessment}
-          />
+          <Button asChild className="shrink-0" size="sm" variant="outline">
+            <Link href="/">Candidate portal</Link>
+          </Button>
         </div>
       </header>
 
@@ -130,7 +124,7 @@ export function JobDetail({ job }: { job: PublicJob }) {
               <CardHeader>
                 <CardTitle>Assessment step</CardTitle>
                 <CardDescription>
-                  This CTA connects the job flow to the assigned assessment route.
+                  Candidates open assessments only through their invitation OTP.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -143,11 +137,15 @@ export function JobDetail({ job }: { job: PublicJob }) {
                       : "No assessment is assigned to this job yet."}
                   </p>
                 </div>
-                <JobAssessmentButton
-                  jobTitle={job.title}
-                  resourceId={primaryAssessment?.questionBankId ?? ""}
-                  disabled={!primaryAssessment}
-                />
+                {primaryAssessment ? (
+                  <Button asChild className="w-full">
+                    <Link href="/">Open candidate portal</Link>
+                  </Button>
+                ) : (
+                  <Button className="w-full" disabled>
+                    Open candidate portal
+                  </Button>
+                )}
                 <Button asChild className="w-full" variant="outline">
                   <Link href="/jobs">Review other jobs</Link>
                 </Button>
