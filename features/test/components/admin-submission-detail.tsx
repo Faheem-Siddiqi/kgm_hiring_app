@@ -522,16 +522,16 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
       <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <Button asChild variant="outline" className="mb-6">
+            <Button asChild variant="outline" className="mb-6 ">
               <Link href="/admin/submissions">
                 <ArrowLeft className="size-4" />
                 Back to submissions
               </Link>
             </Button>
-            <Badge variant="secondary" className="mb-3 w-fit gap-2">
+            {/* <Badge variant="secondary" className="mb-3 w-fit gap-1">
               <ShieldAlert className="size-3.5" />
               Individual submission
-            </Badge>
+            </Badge> */}
             <h1 className="text-3xl font-semibold tracking-tight">
               {submission.candidateName}
             </h1>

@@ -1,5 +1,4 @@
 "use client";
-
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
@@ -380,40 +379,58 @@ export function AdminAssessments({
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="secondary">{assessment.code}</Badge>
-                          <Badge variant="outline">{assessment.questionBankName}</Badge>
+                          {/* <Badge variant="outline">{assessment.questionBankName}</Badge> */}
                         </div>
                         <p className="mt-2 truncate font-semibold">{assessment.name}</p>
                         <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
                           {assessment.description}
                         </p>
                       </div>
-                      <div className="grid w-full grid-cols-3 gap-2 text-center text-[11px] leading-4 text-muted-foreground md:w-64">
-                        <div className="min-w-0 overflow-hidden">
-                          <BarChart3 className="mx-auto mb-1 size-3.5" />
-                          <span className="block truncate">{assessment.sectionCount} sections</span>
-                        </div>
-                        <div className="min-w-0 overflow-hidden">
-                          <ClipboardList className="mx-auto mb-1 size-3.5" />
-                          <span className="block truncate">{assessment.totalQuestions} questions</span>
-                        </div>
-                        <div className="min-w-0 overflow-hidden">
-                          <CheckCircle2 className="mx-auto mb-1 size-3.5" />
-                          <span className="block truncate">{assessment.assignedJobs.length} jobs</span>
-                        </div>
-                      </div>
+                    
                     </div>
-                    {assessment.assignedJobs.length ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {assessment.assignedJobs.map((job) => (
-                          <Badge key={job.id} variant="outline" className="max-w-full rounded-md">
-                            <span className="truncate">{job.title}</span>
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Created {formatDate(assessment.createdAt)}
-                    </p>
+                   
+
+
+
+                   <div className="mt-3 flex w-full flex-wrap items-center gap-2 text-xs text-muted-foreground">
+  {assessment.assignedJobs.length ? (
+    <Badge
+      variant="outline"
+      className="inline-flex max-w-full shrink-0 items-center gap-1 rounded-md whitespace-nowrap text-xs font-medium text-muted-foreground"
+    >
+      <span>{assessment.assignedJobs.length}</span>
+      <span>
+        {assessment.assignedJobs.length === 1
+          ? "Job Assigned"
+          : "Jobs Assigned"}
+      </span>
+    </Badge>
+  ) : null}
+
+  <Badge
+    variant="outline"
+    className="inline-flex max-w-full shrink-0 items-center gap-1 rounded-md whitespace-nowrap text-xs font-medium text-muted-foreground"
+  >
+    <span>{assessment.sectionCount}</span>
+    <span>{assessment.sectionCount === 1 ? "Section" : "Sections"}</span>
+  </Badge>
+
+  <Badge
+    variant="outline"
+    className="inline-flex max-w-full shrink-0 items-center gap-1 rounded-md whitespace-nowrap text-xs font-medium text-muted-foreground"
+  >
+    <span>{assessment.totalQuestions}</span>
+    <span>{assessment.totalQuestions === 1 ? "Question" : "Questions"}</span>
+  </Badge>
+</div>
+
+<p className="mt-3 text-xs text-muted-foreground">
+  Created {formatDate(assessment.createdAt)}
+</p>
+
+
+
+                    
                   </Link>
                 ))}
               </div>
@@ -474,7 +491,7 @@ export function AdminAssessments({
                     id="assessment-title"
                     value={assessmentTitle}
                     onChange={(event) => setAssessmentTitle(event.target.value)}
-                    placeholder="Finance Officer Screening"
+                    placeholder="Admin Officer Screening"
                   />
                 </div>
                 <div className="space-y-2">
