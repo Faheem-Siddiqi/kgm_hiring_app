@@ -17,17 +17,31 @@ export function sendCandidateInviteEmail({
   assessmentTitle,
   otpCode,
   inviteUrl,
+  inviteExpiresAt,
 }: {
   candidateName: string;
   candidateEmail: string;
   assessmentTitle: string;
   otpCode: string;
   inviteUrl: string;
+  inviteExpiresAt: string;
 }): Promise<MailResult> {
   const safeName = escapeHtml(candidateName);
   const safeAssessmentTitle = escapeHtml(assessmentTitle);
   const safeOtpCode = escapeHtml(otpCode);
   const safeInviteUrl = escapeHtml(inviteUrl);
+  const expiryDate = new Date(inviteExpiresAt);
+  const formattedExpiry = Number.isNaN(expiryDate.getTime())
+    ? inviteExpiresAt
+    : new Intl.DateTimeFormat("en-GB", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      }).format(expiryDate);
+  const safeFormattedExpiry = escapeHtml(formattedExpiry);
 
   return sendApplicationMail({
     to: candidateEmail,
@@ -38,6 +52,7 @@ export function sendCandidateInviteEmail({
       "",
       `You have been invited to complete the ${assessmentTitle}.`,
       `Assessment OTP: ${otpCode}`,
+      `Expiry Date: ${formattedExpiry}`,
       "",
       "Open the candidate portal using the link below:",
       inviteUrl,
@@ -81,8 +96,12 @@ export function sendCandidateInviteEmail({
                       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:22px 0; background:#f9fafb; border:1px solid #e5e7eb; border-radius:14px;">
                         <tr>
                           <td style="padding:16px 18px;">
+                            <div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Assessment</div>
+                            <div style="font-size:16px; color:#111827; font-weight:700; margin-bottom:16px;">${safeAssessmentTitle}</div>
                             <div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Assessment OTP</div>
-                            <div style="font-size:22px; letter-spacing:0.16em; color:#111827; font-weight:700;">${safeOtpCode}</div>
+                            <div style="font-size:22px; letter-spacing:0.16em; color:#111827; font-weight:700; margin-bottom:16px;">${safeOtpCode}</div>
+                            <div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Expiry Date</div>
+                            <div style="font-size:16px; color:#111827; font-weight:700;">${safeFormattedExpiry}</div>
                           </td>
                         </tr>
                       </table>

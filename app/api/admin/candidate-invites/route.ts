@@ -15,12 +15,13 @@ type InviteBody = {
   assessmentTitle?: string;
   otpCode?: string;
   inviteUrl?: string;
+  inviteExpiresAt?: string;
 };
 
 function buildInviteUrl(request: Request, otpCode: string) {
   const fallbackOrigin = new URL(request.url).origin;
   const appOrigin = process.env.APP_BASE_URL?.trim() || fallbackOrigin;
-  return `${appOrigin.replace(/\/$/, "")}/?otp=${encodeURIComponent(otpCode)}`;
+  return `${appOrigin.replace(/\/$/, "")}/assessment/verify?otp=${encodeURIComponent(otpCode)}`;
 }
 
 export const POST = withErrorHandler(async (request: Request) => {
@@ -53,6 +54,7 @@ export const POST = withErrorHandler(async (request: Request) => {
       assessmentTitle: body.assessmentTitle?.trim() || invite.assessment.name,
       otpCode: invite.candidate.otpCode,
       inviteUrl: buildInviteUrl(request, invite.candidate.otpCode),
+      inviteExpiresAt: invite.candidate.inviteExpiresAt,
     });
 
     return NextResponse.json({
@@ -68,10 +70,11 @@ export const POST = withErrorHandler(async (request: Request) => {
   const assessmentTitle = body.assessmentTitle?.trim();
   const otpCode = body.otpCode?.trim();
   const inviteUrl = body.inviteUrl?.trim();
+  const inviteExpiresAt = body.inviteExpiresAt?.trim();
 
-  if (!candidateName || !candidateEmail || !assessmentTitle || !otpCode || !inviteUrl) {
+  if (!candidateName || !candidateEmail || !assessmentTitle || !otpCode || !inviteUrl || !inviteExpiresAt) {
     return NextResponse.json(
-      { message: "Candidate name, email, assessment, OTP, and invite link are required." },
+      { message: "Candidate name, email, assessment, OTP, invite link, and expiry are required." },
       { status: 400 },
     );
   }
@@ -82,6 +85,7 @@ export const POST = withErrorHandler(async (request: Request) => {
     assessmentTitle,
     otpCode,
     inviteUrl,
+    inviteExpiresAt,
   });
 
   return NextResponse.json({

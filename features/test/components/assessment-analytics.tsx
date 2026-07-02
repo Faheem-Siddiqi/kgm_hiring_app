@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   BarChart3,
@@ -17,7 +15,11 @@ import {
   Settings2,
   Users,
 } from "lucide-react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+
+
 import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +48,8 @@ import {
   type SectionQuestionTypeConfig,
 } from "@/features/test/assessment-resources";
 import type { PublicAssessment } from "@/lib/assessment-types";
+
+
 
 type AdminSnapshot = {
   candidates?: Candidate[];
@@ -176,6 +180,7 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
   const [savedSettings, setSavedSettings] = useState<Record<string, SectionQuestionTypeConfig>>({});
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [forwardAdminEmail, setForwardAdminEmail] = useState("");
+  const [textScoreDrafts, setTextScoreDrafts] = useState<Record<string, number>>({});
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const searchParams = useSearchParams();
@@ -253,6 +258,21 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
   );
 
   useEffect(() => {
+    let cancelled = false;
+    const nextDrafts = selectedSubmission?.textScores ?? {};
+
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setTextScoreDrafts(nextDrafts);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSubmission?.id, selectedSubmission?.textScores]);
+
+  useEffect(() => {
     const defaults = Object.fromEntries(
       (resourceSummary?.sections ?? []).map((section) => [
         section.id,
@@ -301,7 +321,7 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
 
   function buildCandidateLink(candidate: Candidate) {
     const origin = typeof window === "undefined" ? "" : window.location.origin;
-    return `${origin}/?otp=${candidate.otpCode}`;
+    return `${origin}/assessment/verify?otp=${candidate.otpCode}`;
   }
 
   async function sendCandidateInvite(candidate: Candidate, assessmentTitle: string) {
@@ -430,22 +450,22 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
   }
 
   function updateTextScore(questionId: string, value: string) {
-    if (!selectedSubmission) return;
     const score = Math.min(10, Math.max(0, Number(value)));
-    void saveSubmissionReview("evaluated", {
-      textScores: {
-        ...(selectedSubmission.textScores ?? {}),
-        [questionId]: Number.isFinite(score) ? score : 0,
-      },
-    }).catch((error) =>
-      toast.error(error instanceof Error ? error.message : "Review could not be saved."),
-    );
+    setTextScoreDrafts((current) => ({
+      ...current,
+      [questionId]: Number.isFinite(score) ? score : 0,
+    }));
   }
 
   function markEvaluated() {
     if (!selectedSubmission) return;
+    if (selectedSubmission.evaluatedAt) {
+      toast.error("This submission has already been evaluated.");
+      return;
+    }
+
     setIsEvaluating(true);
-    void saveSubmissionReview("evaluated")
+    void saveSubmissionReview("evaluated", { textScores: textScoreDrafts })
       .then(() => toast.success("Submission marked as evaluated"))
       .catch((error) =>
         toast.error(error instanceof Error ? error.message : "Review could not be saved."),
@@ -1005,9 +1025,13 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                     </div>
                   ) : null}
                   <div className="mb-4 flex flex-wrap gap-2">
-                    <Button type="button" onClick={markEvaluated} disabled={isEvaluating}>
+                    <Button
+                      type="button"
+                      onClick={markEvaluated}
+                      disabled={isEvaluating || Boolean(selectedSubmission.evaluatedAt)}
+                    >
                       {isEvaluating ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-                      Mark evaluated
+                      {selectedSubmission.evaluatedAt ? "Evaluated" : "Mark evaluated"}
                     </Button>
                     <Button type="button" variant="outline" onClick={() => sendCandidateDecision("accepted")}>
                       Acceptance email
@@ -1068,7 +1092,8 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                                   type="number"
                                   min={0}
                                   max={10}
-                                  value={selectedSubmission.textScores?.[question.id] ?? 0}
+                                  value={textScoreDrafts[question.id] ?? ""}
+                                  disabled={Boolean(selectedSubmission.evaluatedAt)}
                                   onChange={(event) => updateTextScore(question.id, event.target.value)}
                                 />
                               </div>

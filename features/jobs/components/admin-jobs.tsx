@@ -26,6 +26,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+
+
+
+
+
+
+
 import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +55,13 @@ import {
   type JobStatus,
   type PublicJob,
 } from "@/lib/job-types";
+
+
+
+
+
+
+
 
 type JobsResponse = {
   jobs: PublicJob[];
@@ -371,8 +385,8 @@ export function AdminJobs({
   async function handleCreateJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!form.assessmentIds.length) {
-      toast.error("Select at least one assessment before creating the job.");
+    if (form.assessmentIds.length !== 1) {
+      toast.error("Select one assessment before creating the job.");
       return;
     }
 
@@ -462,13 +476,8 @@ export function AdminJobs({
     await loadJobs();
   }
 
-  function toggleAssessment(assessmentId: string) {
-    updateForm(
-      "assessmentIds",
-      form.assessmentIds.includes(assessmentId)
-        ? form.assessmentIds.filter((id) => id !== assessmentId)
-        : [...form.assessmentIds, assessmentId],
-    );
+  function selectAssessment(assessmentId: string) {
+    updateForm("assessmentIds", [assessmentId]);
   }
 
   return (
@@ -603,14 +612,14 @@ export function AdminJobs({
                               ))}
                             </div>
                           ) : (
-                            <div className="mt-2">
-                              <Badge
-                                variant="outline"
-                                className="rounded-md text-[11px]"
-                              >
-                                No assessment
-                              </Badge>
-                            </div>
+
+
+
+<Badge variant="secondary" className="max-w-full rounded-md" > <span className="min-w-0 whitespace-normal break-words leading-4"> No Assessment Linked</span> </Badge>
+
+
+
+                            
                           )}
                         </div>
 
@@ -841,8 +850,8 @@ export function AdminJobs({
                   >
                     <span className="min-w-0 truncate text-left">
                       {selectedAssessments.length
-                        ? `${selectedAssessments.length} selected`
-                        : "Select assessments"}
+                        ? selectedAssessments[0]?.name
+                        : "Select one assessment"}
                     </span>
                     <Search className="size-4 shrink-0 text-muted-foreground" />
                   </Button>
@@ -885,12 +894,13 @@ export function AdminJobs({
                             className="flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm hover:bg-muted/40"
                           >
                             <input
-                              type="checkbox"
+                              type="radio"
+                              name="job-assessment"
                               className="mt-1 size-4 accent-primary"
                               checked={form.assessmentIds.includes(
                                 assessment.id,
                               )}
-                              onChange={() => toggleAssessment(assessment.id)}
+                              onChange={() => selectAssessment(assessment.id)}
                             />
 
                             <span className="min-w-0">

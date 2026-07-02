@@ -327,9 +327,25 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
   }, [job]);
   const [activeSectionSlug, setActiveSectionSlug] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
+  const [textScoreDrafts, setTextScoreDrafts] = useState<Record<string, number>>({});
   const [sendingAction, setSendingAction] = useState<SubmissionAction | "evaluated" | null>(null);
   const activeSection =
     sections.find((section) => section.slug === activeSectionSlug) ?? sections[0];
+
+  useEffect(() => {
+    let cancelled = false;
+    const nextDrafts = submission?.textScores ?? {};
+
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setTextScoreDrafts(nextDrafts);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [submission?.id, submission?.textScores]);
 
   if (isLoading) {
     return <SubmissionDetailSkeleton />;
@@ -384,6 +400,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
   const submissionRecord = submission;
   const terminalDecision = submissionRecord.decision;
   const reviewLocked = Boolean(terminalDecision);
+  const evaluationLocked = Boolean(submissionRecord.evaluatedAt);
   const textQuestions = sections.flatMap((section) =>
     section.questions.filter((question) => question.type === "text"),
   );
@@ -427,12 +444,10 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
 
   function updateTextScore(questionId: string, value: string) {
     const score = Math.min(10, Math.max(0, Number(value)));
-    void saveReview("evaluated", {
-      textScores: {
-        ...(submissionRecord.textScores ?? {}),
-        [questionId]: Number.isFinite(score) ? score : 0,
-      },
-    });
+    setTextScoreDrafts((current) => ({
+      ...current,
+      [questionId]: Number.isFinite(score) ? score : 0,
+    }));
   }
 
   async function sendSubmissionEmail({
@@ -444,8 +459,12 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
     to: string;
     subject: string;
   }) {
-    if (reviewLocked) {
-      toast.error("This submission already has a final review decision.");
+    if (reviewLocked || evaluationLocked) {
+      toast.error(
+        evaluationLocked
+          ? "This submission has already been evaluated."
+          : "This submission already has a final review decision.",
+      );
       return;
     }
 
@@ -484,7 +503,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
       return;
     }
 
-    void saveReview("evaluated");
+    void saveReview("evaluated", { textScores: textScoreDrafts });
   }
 
   function sendAcceptanceEmail() {
@@ -679,7 +698,8 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                                   type="number"
                                   min={0}
                                   max={10}
-                                  value={submission.textScores?.[question.id] ?? ""}
+                                  value={textScoreDrafts[question.id] ?? ""}
+                                  disabled={evaluationLocked || reviewLocked}
                                   onChange={(event) =>
                                     updateTextScore(question.id, event.target.value)
                                   }
@@ -772,7 +792,7 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                   type="button"
                   className="w-full"
                   onClick={markEvaluated}
-                  disabled={Boolean(sendingAction) || reviewLocked}
+                  disabled={Boolean(sendingAction) || reviewLocked || evaluationLocked}
                 >
                   {sendingAction === "evaluated" ? (
                     <Loader2 className="size-4 animate-spin" />

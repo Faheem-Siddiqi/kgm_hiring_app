@@ -14,7 +14,9 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock3,
+  CircleDot,
   Headphones,
+  Lock,
   Send,
   ShieldAlert,
   TriangleAlert,
@@ -42,10 +44,14 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createViolation,
+  QUESTION_STATUS_STORAGE_KEY,
   readActiveAssessmentSections,
   readActiveJobAssessment,
+  readAssessmentViolations,
+  readCandidateAttempts,
   readAssessmentResults,
   readCandidates,
+  saveAssessmentAttemptProgress,
   subscribeToAdminData,
   saveAssessmentResult,
 } from "@/features/test/admin-storage";
@@ -68,12 +74,13 @@ type SectionRunnerProps = {
 
 type QuestionStatus = "skipped" | "unanswered";
 
-const QUESTION_STATUS_KEY = "kgm-hiring-assessment-question-statuses";
+const CURRENT_SECTION_STORAGE_KEY = "kgm-hiring-assessment-current-section";
+const CURRENT_QUESTION_STORAGE_KEY = "kgm-hiring-assessment-current-question";
 
 function readQuestionStatuses(): Record<string, QuestionStatus> {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(window.localStorage.getItem(QUESTION_STATUS_KEY) ?? "{}");
+    return JSON.parse(window.localStorage.getItem(QUESTION_STATUS_STORAGE_KEY) ?? "{}");
   } catch {
     return {};
   }
@@ -107,6 +114,28 @@ function writeStoredDeadline(key: string, value: number) {
   window.sessionStorage.setItem(key, String(value));
 }
 
+function readStoredNumber(key: string) {
+  if (typeof window === "undefined") return null;
+
+  const storedValue =
+    window.localStorage.getItem(key) ?? window.sessionStorage.getItem(key);
+  const parsedValue = storedValue ? Number(storedValue) : Number.NaN;
+
+  return Number.isFinite(parsedValue) ? parsedValue : null;
+}
+
+function getStoredQuestionTimeLeft(key: string, fallbackSeconds: number) {
+  const remaining = readStoredNumber(`${key}-remaining`);
+  if (remaining !== null) return Math.max(0, Math.ceil(remaining));
+
+  const deadline = readStoredNumber(key);
+  if (deadline !== null) {
+    return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  }
+
+  return fallbackSeconds;
+}
+
 function subscribeToAnswers(onStoreChange: () => void) {
   window.addEventListener("storage", onStoreChange);
   window.addEventListener("kgm-hiring-assessment-answers-change", onStoreChange);
@@ -136,6 +165,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   const [questionStatuses, setQuestionStatuses] = useState<Record<string, QuestionStatus>>(() => readQuestionStatuses());
   const [showWindowWarning, setShowWindowWarning] = useState(false);
   const [showCompletionDialog, setShowCompletionDialog] = useState(false);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [isChangingSection, setIsChangingSection] = useState(false);
   const [violationCount, setViolationCount] = useState(0);
   const [lastViolationNumber, setLastViolationNumber] = useState<number | null>(
@@ -146,9 +176,13 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   >("Submitted");
   const windowWarningQueuedRef = useRef(false);
   const isStoppingAssessmentRef = useRef(false);
+  const isSubmittingAssessmentRef = useRef(false);
+  const hasAutoSubmittedRef = useRef(false);
+  const restoredAttemptKeyRef = useRef<string | null>(null);
   const timerEndAtRef = useRef<number | null>(null);
   const questionTimerEndAtRef = useRef<number | null>(null);
   const answersRef = useRef<Record<string, string>>({});
+  const submitAssessmentRef = useRef<((status: "Submitted" | "Auto submitted") => Promise<void>) | null>(null);
   const answersSnapshot = useSyncExternalStore(
     subscribeToTestData,
     readStoredAnswersSnapshot,
@@ -161,6 +195,11 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
       ? null
       : window.localStorage.getItem("kgm-hiring-active-candidate-id");
   const activeCandidate = readCandidates().find((candidate) => candidate.id === activeCandidateId);
+  const activeAttempt = readCandidateAttempts().find(
+    (attempt) =>
+      attempt.candidateId === activeCandidateId &&
+      attempt.assessmentId === activeAssessment?.id,
+  );
   const activeAssessmentSubmitted = Boolean(
     activeAssessment &&
       readAssessmentResults().some(
@@ -202,6 +241,27 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   );
   const isFirstQuestion = currentIndex === 0;
   const isLastQuestion = currentIndex === section.questions.length - 1;
+  const allCurrentSectionQuestionsClosed = section.questions.every((question) => {
+    const answer = answers[question.id]?.trim();
+    if (answer) return true;
+    const durationSeconds =
+      question.timeLimitSeconds ?? section.questionTimeSeconds ??
+      Math.max(1, Math.floor(sectionDurationSeconds / section.questions.length));
+    const key = `kgm-hiring-assessment-question-timer-${section.slug}-${question.id}`;
+    return questionStatuses[question.id] === "unanswered" || getStoredQuestionTimeLeft(key, durationSeconds) <= 0;
+  });
+  const allAssessmentQuestionsClosed = activeSections.every((assessmentSection) => {
+    const durationSeconds = getSectionDurationSeconds(assessmentSection.time);
+    return assessmentSection.questions.every((question) => {
+      const answer = answers[question.id]?.trim();
+      if (answer) return true;
+      const questionDuration =
+        question.timeLimitSeconds ?? assessmentSection.questionTimeSeconds ??
+        Math.max(1, Math.floor(durationSeconds / assessmentSection.questions.length));
+      const key = `kgm-hiring-assessment-question-timer-${assessmentSection.slug}-${question.id}`;
+      return questionStatuses[question.id] === "unanswered" || getStoredQuestionTimeLeft(key, questionDuration) <= 0;
+    });
+  });
   const isTimeUp = timeLeftSeconds <= 0;
   const isQuestionTimeUp = questionTimeLeftSeconds <= 0;
   const isLastMinute = timeLeftSeconds > 0 && timeLeftSeconds <= 60;
@@ -218,23 +278,148 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     assessmentSection.questions.map((question) => question.id),
   );
   const totalAnsweredCount = getAnsweredCount(answers, activeQuestionIds);
+  const inviteExpiryTime = activeCandidate?.inviteExpiresAt
+    ? new Date(activeCandidate.inviteExpiresAt).getTime()
+    : Number.POSITIVE_INFINITY;
+  const [isInviteExpired, setIsInviteExpired] = useState(false);
+  const activeAttemptRestoreKey = activeAttempt
+    ? [
+        activeAttempt.id,
+        section.slug,
+        activeAttempt.currentQuestionId ?? "",
+        JSON.stringify(activeAttempt.answers ?? {}),
+        JSON.stringify(activeAttempt.questionStatuses ?? {}),
+      ].join("|")
+    : "";
 
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
 
+  useEffect(() => {
+    if (!activeAttempt) return;
+    if (restoredAttemptKeyRef.current === activeAttemptRestoreKey) return;
+    restoredAttemptKeyRef.current = activeAttemptRestoreKey;
+
+    if (Object.keys(activeAttempt.answers).length) {
+      writeStoredAnswers(activeAttempt.answers);
+    }
+
+    if (Object.keys(activeAttempt.questionStatuses).length) {
+      window.localStorage.setItem(
+        QUESTION_STATUS_STORAGE_KEY,
+        JSON.stringify(activeAttempt.questionStatuses),
+      );
+      window.setTimeout(() => setQuestionStatuses(activeAttempt.questionStatuses), 0);
+    }
+
+    const serverTimeOffsetMs = activeAttempt.serverNow
+      ? Date.now() - new Date(activeAttempt.serverNow).getTime()
+      : 0;
+
+    Object.entries(activeAttempt.sectionDeadlines ?? {}).forEach(([slug, deadline]) => {
+      const value = new Date(deadline).getTime() + serverTimeOffsetMs;
+      if (Number.isFinite(value)) {
+        writeStoredDeadline(`kgm-hiring-assessment-timer-${slug}`, value);
+      }
+    });
+
+    Object.entries(activeAttempt.questionDeadlines ?? {}).forEach(([questionId, deadline]) => {
+      const value = new Date(deadline).getTime() + serverTimeOffsetMs;
+      if (Number.isFinite(value)) {
+        const question = activeSections
+          .flatMap((assessmentSection) => assessmentSection.questions.map((item) => ({
+            sectionSlug: assessmentSection.slug,
+            questionId: item.id,
+          })))
+          .find((item) => item.questionId === questionId);
+
+        if (question) {
+          writeStoredDeadline(
+            `kgm-hiring-assessment-question-timer-${question.sectionSlug}-${questionId}`,
+            value,
+          );
+        }
+      }
+    });
+
+    if (activeAttempt.currentQuestionId) {
+      const restoredIndex = section.questions.findIndex(
+        (question) => question.id === activeAttempt.currentQuestionId,
+      );
+      if (restoredIndex >= 0) {
+        window.setTimeout(() => setCurrentIndex(restoredIndex), 0);
+      }
+    }
+  }, [activeAttempt, activeAttemptRestoreKey, activeSections, section.questions]);
+
+  useEffect(() => {
+    window.localStorage.setItem(CURRENT_SECTION_STORAGE_KEY, section.slug);
+    window.localStorage.setItem(CURRENT_QUESTION_STORAGE_KEY, currentQuestion.id);
+  }, [currentQuestion.id, section.slug]);
+
+  useEffect(() => {
+    if (!activeCandidateId || !activeAssessment?.id) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void saveAssessmentAttemptProgress({
+        candidateId: activeCandidateId,
+        assessmentId: activeAssessment.id,
+        answers: JSON.parse(answersSnapshot) as Record<string, string>,
+        questionStatuses,
+        currentSectionSlug: section.slug,
+        currentQuestionId: currentQuestion.id,
+        questionDurations: {
+          [currentQuestion.id]: questionDurationSeconds,
+        },
+        violations: readAssessmentViolations(),
+      }).catch(() => undefined);
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeAssessment?.id, activeCandidateId, answersSnapshot, currentQuestion.id, questionDurationSeconds, questionStatuses, section.slug]);
+
+  useEffect(() => {
+    if (!Number.isFinite(inviteExpiryTime)) return;
+
+    function updateInviteExpiry() {
+      setIsInviteExpired(inviteExpiryTime <= Date.now());
+    }
+
+    updateInviteExpiry();
+    const intervalId = window.setInterval(updateInviteExpiry, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [inviteExpiryTime]);
+
   async function submitAssessment(status: "Submitted" | "Auto submitted") {
+    if (isSubmittingAssessmentRef.current || showCompletionDialog) {
+      return;
+    }
+
+    if (isInviteExpired) {
+      toast.error("This assessment invitation has expired. Submission is closed.");
+      return;
+    }
+
+    isSubmittingAssessmentRef.current = true;
     try {
       await saveAssessmentResult({
         answers: answersRef.current,
         status,
       });
+      setShowSubmitConfirm(false);
+      setShowWindowWarning(false);
       setSubmissionStatus(status);
       setShowCompletionDialog(true);
     } catch (error) {
+      isSubmittingAssessmentRef.current = false;
       toast.error(error instanceof Error ? error.message : "Submission could not be saved.");
     }
   }
+
+  useEffect(() => {
+    submitAssessmentRef.current = submitAssessment;
+  });
 
   useEffect(() => {
     void enterAssessmentFullscreen().then((enteredFullscreen) => {
@@ -260,14 +445,6 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
 
       setViolationCount(nextViolationCount);
       setLastViolationNumber(nextViolationCount);
-
-      if (nextViolationCount >= 3) {
-        isStoppingAssessmentRef.current = true;
-        setShowWindowWarning(false);
-        void exitAssessmentFullscreen();
-        void submitAssessment("Auto submitted");
-        return;
-      }
 
       windowWarningQueuedRef.current = true;
       flushSync(() => {
@@ -339,7 +516,13 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   }, [section.slug]);
 
   useEffect(() => {
-    const storedEndAt = readStoredDeadline(timerStorageKey);
+    const serverTimeOffsetMs = activeAttempt?.serverNow
+      ? Date.now() - new Date(activeAttempt.serverNow).getTime()
+      : 0;
+    const serverEndAt = activeAttempt?.sectionDeadlines[section.slug]
+      ? new Date(activeAttempt.sectionDeadlines[section.slug]).getTime() + serverTimeOffsetMs
+      : null;
+    const storedEndAt = serverEndAt ?? readStoredDeadline(timerStorageKey);
     const endAt = storedEndAt ?? Date.now() + sectionDurationSeconds * 1000;
     timerEndAtRef.current = endAt;
 
@@ -360,17 +543,17 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     const intervalId = window.setInterval(updateTimer, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [sectionDurationSeconds, timerStorageKey]);
+  }, [activeAttempt, section.slug, sectionDurationSeconds, timerStorageKey]);
 
   useEffect(() => {
-    const storedEndAt = readStoredDeadline(questionTimerStorageKey);
-    const storedRemaining =
-      window.localStorage.getItem(questionRemainingStorageKey) ??
-      window.sessionStorage.getItem(questionRemainingStorageKey);
-    const remainingSeconds = storedRemaining
-      ? Math.max(0, Number(storedRemaining))
-      : questionDurationSeconds;
-    const endAt = storedEndAt ?? Date.now() + remainingSeconds * 1000;
+    const serverTimeOffsetMs = activeAttempt?.serverNow
+      ? Date.now() - new Date(activeAttempt.serverNow).getTime()
+      : 0;
+    const serverEndAt = activeAttempt?.questionDeadlines[currentQuestion.id]
+      ? new Date(activeAttempt.questionDeadlines[currentQuestion.id]).getTime() + serverTimeOffsetMs
+      : null;
+    const storedEndAt = serverEndAt ?? readStoredDeadline(questionTimerStorageKey);
+    const endAt = storedEndAt ?? Date.now() + questionDurationSeconds * 1000;
     questionTimerEndAtRef.current = endAt;
 
     if (!storedEndAt) {
@@ -392,32 +575,30 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     const intervalId = window.setInterval(updateQuestionTimer, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [questionDurationSeconds, questionRemainingStorageKey, questionTimerStorageKey]);
+  }, [activeAttempt, currentQuestion.id, questionDurationSeconds, questionRemainingStorageKey, questionTimerStorageKey]);
 
   function writeQuestionStatus(questionId: string, status: QuestionStatus) {
     const next = { ...questionStatuses, [questionId]: status };
-    window.localStorage.setItem(QUESTION_STATUS_KEY, JSON.stringify(next));
+    window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
     setQuestionStatuses(next);
   }
 
-  function pauseCurrentQuestionTimer() {
-    const remaining = questionTimeLeftSeconds;
-    window.sessionStorage.setItem(questionRemainingStorageKey, String(remaining));
-    window.localStorage.setItem(questionRemainingStorageKey, String(remaining));
-    window.sessionStorage.removeItem(questionTimerStorageKey);
-    window.localStorage.removeItem(questionTimerStorageKey);
-    questionTimerEndAtRef.current = null;
+  function clearQuestionStatus(questionId: string) {
+    if (!questionStatuses[questionId]) return;
+
+    const next = { ...questionStatuses };
+    delete next[questionId];
+    window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
+    setQuestionStatuses(next);
   }
 
   function moveToQuestion(index: number) {
     if (isTimeUp || index === currentIndex) return;
-    pauseCurrentQuestionTimer();
     setCurrentIndex(index);
   }
 
   function skipCurrentQuestion() {
     writeQuestionStatus(currentQuestion.id, "skipped");
-    pauseCurrentQuestionTimer();
     if (!isLastQuestion) {
       setCurrentIndex((index) => index + 1);
     }
@@ -432,7 +613,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
           ...current,
           [currentQuestion.id]: "unanswered",
         };
-        window.localStorage.setItem(QUESTION_STATUS_KEY, JSON.stringify(next));
+        window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
         return next;
       });
       window.sessionStorage.setItem(questionRemainingStorageKey, "0");
@@ -446,6 +627,65 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
 
     return () => window.clearTimeout(timeoutId);
   }, [currentQuestion.id, isLastQuestion, isQuestionTimeUp, isTimeUp, questionRemainingStorageKey, questionTimerStorageKey]);
+
+  useEffect(() => {
+    if (!allCurrentSectionQuestionsClosed) return;
+
+    const timeoutId = window.setTimeout(() => {
+      if (nextSectionSlug) {
+        setIsChangingSection(true);
+        router.replace(`/assessment/${nextSectionSlug}`);
+        return;
+      }
+
+      if (allAssessmentQuestionsClosed) {
+        void submitAssessmentRef.current?.("Auto submitted");
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [allAssessmentQuestionsClosed, allCurrentSectionQuestionsClosed, nextSectionSlug, router]);
+
+  useEffect(() => {
+    if (
+      totalAnsweredCount !== totalQuestionCount ||
+      !totalQuestionCount ||
+      hasAutoSubmittedRef.current ||
+      showCompletionDialog ||
+      activeAssessmentSubmitted ||
+      !activeCandidate
+    ) {
+      return;
+    }
+
+    hasAutoSubmittedRef.current = true;
+    void submitAssessmentRef.current?.("Auto submitted");
+  }, [activeAssessmentSubmitted, activeCandidate, showCompletionDialog, totalAnsweredCount, totalQuestionCount]);
+
+  useEffect(() => {
+    if (
+      !isTimeUp ||
+      hasAutoSubmittedRef.current ||
+      showCompletionDialog ||
+      activeAssessmentSubmitted ||
+      !activeCandidate
+    ) {
+      return;
+    }
+
+    hasAutoSubmittedRef.current = true;
+    setQuestionStatuses((current) => {
+      const next = { ...current };
+      section.questions.forEach((question) => {
+        if (!answersRef.current[question.id]?.trim()) {
+          next[question.id] = "unanswered";
+        }
+      });
+      window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+    void submitAssessmentRef.current?.("Auto submitted");
+  }, [activeAssessmentSubmitted, activeCandidate, isTimeUp, section.questions, showCompletionDialog]);
 
   useEffect(() => {
     router.prefetch("/assessment");
@@ -469,6 +709,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
       [questionId]: value,
     };
 
+    clearQuestionStatus(questionId);
     writeStoredAnswers(nextAnswers);
   }
 
@@ -485,6 +726,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
       ? existingValues.filter((value) => value !== option)
       : [...existingValues, option];
 
+    clearQuestionStatus(questionId);
     writeStoredAnswers({
       ...answers,
       [questionId]: nextValues.join("||"),
@@ -505,24 +747,21 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     isStoppingAssessmentRef.current = true;
     setShowWindowWarning(false);
     await exitAssessmentFullscreen();
-    router.replace("/assessment");
+    router.replace("/jobs");
   }
 
   function leaveTimedOutSection() {
-    router.replace("/assessment");
-  }
-
-  function resetSectionTimer() {
-    const nextEndAt = Date.now() + sectionDurationSeconds * 1000;
-
-    timerEndAtRef.current = nextEndAt;
-    writeStoredDeadline(timerStorageKey, nextEndAt);
-    setTimeLeftSeconds(sectionDurationSeconds);
+    router.replace("/jobs");
   }
 
   function finishSubmittedAssessment() {
     setShowCompletionDialog(false);
-    router.replace("/assessment");
+    void exitAssessmentFullscreen();
+    router.replace("/jobs");
+  }
+
+  function requestManualSubmit() {
+    setShowSubmitConfirm(true);
   }
 
   function readQuestionAloud() {
@@ -563,29 +802,24 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             <DialogTitle>Test submitted</DialogTitle>
             <DialogDescription>
               {submissionStatus === "Auto submitted"
-                ? "This assessment was submitted automatically after 3 fullscreen violations."
-                : "This assessment has been submitted. You will return to the assessment overview."}
+                ? "Time is up. This assessment was submitted automatically and this OTP can no longer be used."
+                : "This assessment has been submitted successfully and this OTP can no longer be used."}
             </DialogDescription>
           </DialogHeader>
-          {submissionStatus === "Auto submitted" ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-              Assessment terminated after violation :03.
-            </div>
-          ) : null}
           <div className="rounded-md border bg-muted/30 p-4 text-sm">
             <span className="font-medium">{totalAnsweredCount}</span> of{" "}
             <span className="font-medium">{totalQuestionCount}</span> questions
             have saved answers.
           </div>
           <DialogFooter>
-            <Button onClick={finishSubmittedAssessment}>OK</Button>
+            <Button onClick={finishSubmittedAssessment}>Go to jobs</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     );
   }
 
-  if (!activeCandidate || activeAssessmentSubmitted) {
+  if (!activeCandidate || activeAssessmentSubmitted || isInviteExpired) {
     return (
       <main className="min-h-svh bg-background px-4 py-20 text-foreground sm:px-6 lg:px-8">
         <section className="mx-auto w-full max-w-3xl">
@@ -593,13 +827,14 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             <CardHeader>
               <CardTitle>Assessment unavailable</CardTitle>
               <CardDescription>
-                This assessment is already submitted or no active candidate
-                session is available.
+                {isInviteExpired
+                  ? "This assessment invitation has expired. You can no longer start, continue, or submit this assessment."
+                  : "This assessment is already submitted or no active candidate session is available."}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Button asChild>
-                <Link href="/assessment">Back to assessment overview</Link>
+                <Link href="/jobs">Go to jobs</Link>
               </Button>
             </CardContent>
           </Card>
@@ -713,14 +948,29 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                 {section.questions.map((question, index) => {
                   const isAnswered = Boolean(answers[question.id]?.trim());
                   const status = questionStatuses[question.id];
-                  const canLeaveCurrentQuestion =
-                    hasCurrentAnswer || Boolean(questionStatuses[currentQuestion.id]);
-
+                  const durationSeconds =
+                    question.timeLimitSeconds ?? section.questionTimeSeconds ??
+                    Math.max(1, Math.floor(sectionDurationSeconds / section.questions.length));
+                  const questionTimeLeft = getStoredQuestionTimeLeft(
+                    `kgm-hiring-assessment-question-timer-${section.slug}-${question.id}`,
+                    durationSeconds,
+                  );
+                  const isExpired = status === "unanswered" || questionTimeLeft <= 0;
+                  const isCurrent = index === currentIndex;
+                  const statusLabel = isCurrent
+                    ? "Current"
+                    : isAnswered
+                      ? "Attempted"
+                      : isExpired
+                        ? "Time expired"
+                        : status === "skipped"
+                          ? "Skipped / pending"
+                          : "Pending";
                   return (
                     <Button
                       className={[
                         "justify-between border",
-                        index === currentIndex
+                        isCurrent
                           ? "border-primary/50 bg-primary/10 text-foreground shadow-none hover:bg-primary/15"
                           : "bg-background hover:bg-muted/60",
                       ].join(" ")}
@@ -728,22 +978,30 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                       onClick={() => {
                         moveToQuestion(index);
                       }}
-                      disabled={isTimeUp || (!canLeaveCurrentQuestion && index !== currentIndex)}
+                      disabled={isTimeUp}
                       variant="outline"
                     >
                       <span>Question {index + 1}</span>
                       <span
-                        aria-label={isAnswered ? "Answered" : status === "skipped" ? "Skipped" : status === "unanswered" ? "Timed out" : "Pending"}
+                        aria-label={statusLabel}
                         className={[
                           "inline-flex size-6 items-center justify-center rounded-full border",
-                          isAnswered
+                          isCurrent
+                            ? "border-primary/30 bg-primary/15 text-primary"
+                            : isAnswered
                             ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-600"
+                            : isExpired
+                              ? "border-destructive/30 bg-destructive/10 text-destructive"
                             : "border-amber-500/30 bg-amber-500/15 text-amber-600",
                         ].join(" ")}
-                        title={isAnswered ? "Answered" : status === "skipped" ? "Skipped" : status === "unanswered" ? "Timed out" : "Pending"}
+                        title={statusLabel}
                       >
-                        {isAnswered ? (
+                        {isCurrent ? (
+                          <CircleDot className="size-4" aria-hidden="true" />
+                        ) : isAnswered ? (
                           <CheckCircle2 className="size-4" aria-hidden="true" />
+                        ) : isExpired ? (
+                          <Lock className="size-4" aria-hidden="true" />
                         ) : (
                           <TriangleAlert className="size-4" aria-hidden="true" />
                         )}
@@ -763,9 +1021,15 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                   All sections
                 </Link>
               </Button>
-              <Badge variant="outline">
-                {activeAssessment?.role ?? "Assessment"}
-              </Badge>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">
+                  {activeAssessment?.role ?? "Assessment"}
+                </Badge>
+                <Button onClick={requestManualSubmit}>
+                  Submit Test
+                  <Send className="size-4" />
+                </Button>
+              </div>
             </div>
 
             <Card>
@@ -878,7 +1142,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
 
                 <div className="flex flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
                   <Button
-                    disabled={isFirstQuestion || (!hasCurrentAnswer && !questionStatuses[currentQuestion.id])}
+                    disabled={isFirstQuestion}
                     onClick={() => {
                       moveToQuestion(currentIndex - 1);
                     }}
@@ -904,7 +1168,6 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                           <Link
                             href={`/assessment/${nextSectionSlug}`}
                             onClick={() => {
-                              pauseCurrentQuestionTimer();
                               setIsChangingSection(true);
                             }}
                           >
@@ -913,21 +1176,36 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                           </Link>
                         </Button>
                       ) : (
-                        <Button disabled>
-                          Next section
-                          <ArrowRight className="size-4" />
+                        <Button asChild>
+                          <Link
+                            href={`/assessment/${nextSectionSlug}`}
+                            onClick={() => {
+                              if (!hasCurrentAnswer && !questionStatuses[currentQuestion.id]) {
+                                writeQuestionStatus(currentQuestion.id, "skipped");
+                              }
+                              setIsChangingSection(true);
+                            }}
+                          >
+                            Next section
+                            <ArrowRight className="size-4" />
+                          </Link>
                         </Button>
                       )
                     ) : (
-                      <Button disabled={!hasCurrentAnswer} onClick={() => void submitAssessment("Submitted")}>
+                      <Button onClick={requestManualSubmit}>
                         Submit Test
                         <Send className="size-4" />
                       </Button>
                     )
                   ) : (
                     <Button
-                      disabled={isTimeUp || !hasCurrentAnswer}
-                      onClick={() => moveToQuestion(currentIndex + 1)}
+                      disabled={isTimeUp}
+                      onClick={() => {
+                        if (!hasCurrentAnswer && !questionStatuses[currentQuestion.id]) {
+                          writeQuestionStatus(currentQuestion.id, "skipped");
+                        }
+                        moveToQuestion(currentIndex + 1);
+                      }}
                     >
                       Next
                       <ArrowRight className="size-4" />
@@ -965,8 +1243,9 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
               <span className="font-mono text-destructive">
                 :{String(lastViolationNumber ?? violationCount).padStart(2, "0")}
               </span>{" "}
-              recorded. The assessment must stay in fullscreen. On the 3rd
-              violation, the assessment is submitted automatically.
+              recorded. The assessment must stay in fullscreen. Violations are
+              recorded for admin review, but you can continue after returning
+              to fullscreen.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -980,7 +1259,41 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isTimeUp}>
+      <Dialog open={showSubmitConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <Send className="size-5" />
+            </div>
+            <DialogTitle>Submit assessment?</DialogTitle>
+            <DialogDescription>
+              You can submit now, even if some questions are skipped or pending.
+              After submission, this assessment will be locked permanently and
+              cannot be reopened or edited.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border bg-muted/30 p-4 text-sm">
+            <span className="font-medium">{totalAnsweredCount}</span> of{" "}
+            <span className="font-medium">{totalQuestionCount}</span> questions
+            currently have saved answers.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSubmitConfirm(false)}>
+              Continue assessment
+            </Button>
+            <Button
+              onClick={() => {
+                setShowSubmitConfirm(false);
+                void submitAssessment("Submitted");
+              }}
+            >
+              Submit assessment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isTimeUp && !showCompletionDialog}>
         <DialogContent>
           <DialogHeader>
             <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-destructive text-white">
@@ -988,15 +1301,12 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             </div>
             <DialogTitle>Time is up</DialogTitle>
             <DialogDescription>
-              The allotted time for this section has ended. You can return to
-              the assessment overview.
+              Time is up. Your saved answers are being submitted automatically.
+              You can go to the jobs page after the submission is saved.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={resetSectionTimer}>
-              Reset timer
-            </Button>
-            <Button onClick={leaveTimedOutSection}>Back to overview</Button>
+            <Button onClick={leaveTimedOutSection}>Go to jobs</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1010,22 +1320,17 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             <DialogTitle>Test submitted</DialogTitle>
             <DialogDescription>
               {submissionStatus === "Auto submitted"
-                ? "This assessment was submitted automatically after 3 fullscreen violations."
-                : "This assessment has been submitted. You will return to the assessment overview."}
+                ? "Time is up. This assessment was submitted automatically and this OTP can no longer be used."
+                : "This assessment has been submitted successfully and this OTP can no longer be used."}
             </DialogDescription>
           </DialogHeader>
-          {submissionStatus === "Auto submitted" ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-              Assessment terminated after violation :03.
-            </div>
-          ) : null}
           <div className="rounded-md border bg-muted/30 p-4 text-sm">
             <span className="font-medium">{totalAnsweredCount}</span> of{" "}
             <span className="font-medium">{totalQuestionCount}</span> questions
             have saved answers.
           </div>
           <DialogFooter>
-            <Button onClick={finishSubmittedAssessment}>OK</Button>
+            <Button onClick={finishSubmittedAssessment}>Go to jobs</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -3,6 +3,7 @@ import "server-only";
 import { ObjectId, type Collection, type Db, type WithId } from "mongodb";
 import { getDatabase } from "@/db";
 import { getAssessmentById } from "@/lib/assessments";
+import { buildAssessmentSectionsFromResource } from "@/features/test/assessment-resources";
 import type { PublicAssessment } from "@/lib/assessment-types";
 import { getJobById } from "@/lib/jobs";
 
@@ -63,6 +64,22 @@ type SubmissionDocument = {
   decision?: "accepted" | "rejected" | "forwarded";
 };
 
+type CandidateAttemptDocument = {
+  candidateId: ObjectId;
+  assessmentId: ObjectId;
+  status: "Not Started" | "In Progress" | "Submitted" | "Expired";
+  startedAt?: Date;
+  updatedAt: Date;
+  currentSectionSlug?: string;
+  currentQuestionId?: string;
+  answers: Record<string, string>;
+  questionStatuses: Record<string, "skipped" | "unanswered">;
+  sectionDeadlines: Record<string, Date>;
+  questionDeadlines: Record<string, Date>;
+  violations: AssessmentViolationRecord[];
+  submittedAt?: Date;
+};
+
 export type PublicCandidateRecord = {
   id: string;
   name: string;
@@ -114,6 +131,24 @@ export type PublicSubmissionRecord = {
   reviews: PublicSubmissionReview[];
 };
 
+export type PublicCandidateAttemptRecord = {
+  id: string;
+  candidateId: string;
+  assessmentId: string;
+  status: CandidateAttemptDocument["status"];
+  startedAt?: string;
+  updatedAt: string;
+  currentSectionSlug?: string;
+  currentQuestionId?: string;
+  answers: Record<string, string>;
+  questionStatuses: Record<string, "skipped" | "unanswered">;
+  sectionDeadlines: Record<string, string>;
+  questionDeadlines: Record<string, string>;
+  violations: Array<Omit<AssessmentViolationRecord, "occurredAt"> & { occurredAt: string }>;
+  submittedAt?: string;
+  serverNow: string;
+};
+
 export type CreateAssessmentCandidateResult = {
   candidate: PublicCandidateRecord;
   assessment: PublicAssessment;
@@ -159,6 +194,7 @@ function isCandidateInviteExpired(candidate: Pick<CandidateDocument, "inviteExpi
 async function ensureIndexes(database: Db) {
   if (!indexesReady) {
     const submissions = database.collection<SubmissionDocument>("assessmentSubmissions");
+    const attempts = database.collection<CandidateAttemptDocument>("candidateAssessmentAttempts");
     indexesReady = Promise.all([
       database.collection<CandidateDocument>("assessmentCandidates").createIndex(
         { otpCode: 1 },
@@ -179,6 +215,7 @@ async function ensureIndexes(database: Db) {
       database
         .collection<SubmissionDocument>("assessmentSubmissions")
         .createIndex({ assessmentId: 1, submittedAt: -1 }),
+      attempts.createIndex({ candidateId: 1, assessmentId: 1 }, { unique: true }),
       submissions.dropIndex("candidateId_1").catch(() => undefined),
     ])
       .then(() => submissions.createIndex({ candidateId: 1, assessmentId: 1 }, { unique: true }))
@@ -198,6 +235,7 @@ async function getCollections() {
   return {
     candidates: database.collection<CandidateDocument>("assessmentCandidates"),
     submissions: database.collection<SubmissionDocument>("assessmentSubmissions"),
+    attempts: database.collection<CandidateAttemptDocument>("candidateAssessmentAttempts"),
   };
 }
 
@@ -262,6 +300,116 @@ function toPublicSubmission(submission: WithId<SubmissionDocument>): PublicSubmi
       createdAt: review.createdAt.toISOString(),
     })),
   };
+}
+
+function toPublicAttempt(attempt: WithId<CandidateAttemptDocument>): PublicCandidateAttemptRecord {
+  return {
+    id: attempt._id.toString(),
+    candidateId: attempt.candidateId.toString(),
+    assessmentId: attempt.assessmentId.toString(),
+    status: attempt.status,
+    ...(attempt.startedAt ? { startedAt: attempt.startedAt.toISOString() } : {}),
+    updatedAt: attempt.updatedAt.toISOString(),
+    currentSectionSlug: attempt.currentSectionSlug,
+    currentQuestionId: attempt.currentQuestionId,
+    answers: attempt.answers ?? {},
+    questionStatuses: attempt.questionStatuses ?? {},
+    sectionDeadlines: Object.fromEntries(
+      Object.entries(attempt.sectionDeadlines ?? {}).map(([key, value]) => [
+        key,
+        value.toISOString(),
+      ]),
+    ),
+    questionDeadlines: Object.fromEntries(
+      Object.entries(attempt.questionDeadlines ?? {}).map(([key, value]) => [
+        key,
+        value.toISOString(),
+      ]),
+    ),
+    violations: (attempt.violations ?? []).map((violation) => ({
+      ...violation,
+      occurredAt: violation.occurredAt.toISOString(),
+    })),
+    ...(attempt.submittedAt ? { submittedAt: attempt.submittedAt.toISOString() } : {}),
+    serverNow: new Date().toISOString(),
+  };
+}
+
+function buildAssessmentSections(assessment: PublicAssessment) {
+  const sectionTypeConfigs = Object.fromEntries(
+    assessment.sectionSettings.map((section) => [section.sectionId, section.types]),
+  );
+  const questionsPerSection = Math.max(
+    1,
+    ...assessment.sectionSettings.map(
+      (section) =>
+        section.types.mcq.quantity +
+        section.types.multi.quantity +
+        section.types.text.quantity,
+    ),
+  );
+  const timePerSectionMinutes = Math.max(
+    1,
+    ...assessment.sectionSettings.map((section) =>
+      Math.ceil(
+        Math.max(
+          section.types.mcq.timeLimitSeconds,
+          section.types.multi.timeLimitSeconds,
+          section.types.text.timeLimitSeconds,
+        ) / 60,
+      ),
+    ),
+  );
+
+  return buildAssessmentSectionsFromResource({
+    resourceId: assessment.questionBankId,
+    sectionCount: assessment.sectionCount,
+    questionsPerSection,
+    timePerSectionMinutes,
+    seed: assessment.id,
+    sectionTypeConfigs,
+  });
+}
+
+async function calculateSubmissionScore({
+  assessmentId,
+  answers,
+  textScores = {},
+}: {
+  assessmentId: string;
+  answers: Record<string, string>;
+  textScores?: Record<string, number>;
+}) {
+  const assessment = await getAssessmentById(assessmentId);
+  if (!assessment) return 0;
+
+  const questions = buildAssessmentSections(assessment).flatMap(
+    (section) => section.questions,
+  );
+  const totalPoints = questions.length;
+  const earnedPoints = questions.reduce((total, question) => {
+    if (question.type === "text") {
+      return total + Math.min(10, Math.max(0, textScores[question.id] ?? 0)) / 10;
+    }
+
+    const expected = question.correctAnswers ?? [];
+    const provided = (answers[question.id] ?? "").split("||").filter(Boolean);
+
+    if (!expected.length) return total;
+    if (question.type === "mcq") {
+      return total + (provided[0] === expected[0] ? 1 : 0);
+    }
+
+    const correctSelections = provided.filter((value) => expected.includes(value)).length;
+    const incorrectSelections = provided.filter((value) => !expected.includes(value)).length;
+
+    return total + Math.max(
+      0,
+      correctSelections / expected.length - incorrectSelections / expected.length,
+    );
+  }, 0);
+
+  return totalPoints ? Math.round((earnedPoints / totalPoints) * 100) : 0;
 }
 
 export async function createAssessmentCandidate({
@@ -462,8 +610,9 @@ export async function authenticateCandidateOtp(otpCode: string): Promise<{
   candidate: PublicCandidateRecord;
   assessment: PublicAssessment;
   assessments?: PublicAssessment[];
+  attempts?: PublicCandidateAttemptRecord[];
 } | null> {
-  const { candidates, submissions } = await getCollections();
+  const { candidates, submissions, attempts } = await getCollections();
   const candidate = await candidates.findOne({
     otpCode: otpCode.trim(),
     submittedAt: { $exists: false },
@@ -495,7 +644,201 @@ export async function authenticateCandidateOtp(otpCode: string): Promise<{
   const assessment = assessments[0];
   if (!assessment) return null;
 
-  return { candidate: toPublicCandidate(candidate), assessment, assessments };
+  const attemptRecords = await attempts
+    .find({ candidateId: candidate._id, assessmentId: { $in: assessmentIds } })
+    .toArray();
+
+  return {
+    candidate: toPublicCandidate(candidate),
+    assessment,
+    assessments,
+    attempts: attemptRecords.map(toPublicAttempt),
+  };
+}
+
+export async function getCandidateAttempts(candidateId: string) {
+  if (!ObjectId.isValid(candidateId)) return [];
+
+  const { attempts } = await getCollections();
+  const records = await attempts
+    .find({ candidateId: new ObjectId(candidateId) })
+    .sort({ updatedAt: -1 })
+    .toArray();
+
+  return records.map(toPublicAttempt);
+}
+
+async function getActiveCandidateForAssessment(candidateId: string, assessmentId: string) {
+  if (!ObjectId.isValid(candidateId) || !ObjectId.isValid(assessmentId)) {
+    throw new Error("Candidate or assessment is not valid.");
+  }
+
+  const { candidates, submissions } = await getCollections();
+  const candidateObjectId = new ObjectId(candidateId);
+  const assessmentObjectId = new ObjectId(assessmentId);
+  const [candidate, existingSubmission] = await Promise.all([
+    candidates.findOne({
+      _id: candidateObjectId,
+      $or: [
+        { assessmentId: assessmentObjectId },
+        { assessmentIds: assessmentObjectId },
+      ],
+      submittedAt: { $exists: false },
+    }),
+    submissions.findOne(
+      { candidateId: candidateObjectId, assessmentId: assessmentObjectId },
+      { projection: { _id: 1 } },
+    ),
+  ]);
+
+  if (!candidate || existingSubmission) {
+    throw new Error("This assessment is already submitted or no longer available.");
+  }
+
+  if (isCandidateInviteExpired(candidate)) {
+    throw new Error("This assessment invitation has expired.");
+  }
+
+  return { candidate, candidateObjectId, assessmentObjectId };
+}
+
+export async function startOrResumeCandidateAttempt({
+  candidateId,
+  assessmentId,
+  sectionDurations,
+}: {
+  candidateId: string;
+  assessmentId: string;
+  sectionDurations: Record<string, number>;
+  questionDurations: Record<string, number>;
+}) {
+  const { candidateObjectId, assessmentObjectId } = await getActiveCandidateForAssessment(
+    candidateId,
+    assessmentId,
+  );
+  const { attempts } = await getCollections();
+  const existingAttempt = await attempts.findOne({
+    candidateId: candidateObjectId,
+    assessmentId: assessmentObjectId,
+  });
+
+  if (existingAttempt?.submittedAt || existingAttempt?.status === "Submitted") {
+    throw new Error("This assessment is already submitted and cannot be reopened.");
+  }
+
+  if (existingAttempt) {
+    return toPublicAttempt(existingAttempt);
+  }
+
+  const now = new Date();
+  const sectionDeadlines = Object.fromEntries(
+    Object.entries(sectionDurations).map(([key, seconds]) => [
+      key,
+      new Date(now.getTime() + Math.max(0, Math.round(seconds)) * 1000),
+    ]),
+  );
+  const insert = await attempts.insertOne({
+    candidateId: candidateObjectId,
+    assessmentId: assessmentObjectId,
+    status: "In Progress",
+    startedAt: now,
+    updatedAt: now,
+    answers: {},
+    questionStatuses: {},
+    sectionDeadlines,
+    questionDeadlines: {},
+    violations: [],
+  });
+  const attempt = await attempts.findOne({ _id: insert.insertedId });
+
+  if (!attempt) {
+    throw new Error("Assessment attempt was created but could not be loaded.");
+  }
+
+  return toPublicAttempt(attempt);
+}
+
+export async function saveCandidateAttemptProgress({
+  candidateId,
+  assessmentId,
+  answers,
+  questionStatuses,
+  currentSectionSlug,
+  currentQuestionId,
+  violations,
+  questionDurations,
+}: {
+  candidateId: string;
+  assessmentId: string;
+  answers: Record<string, string>;
+  questionStatuses: Record<string, "skipped" | "unanswered">;
+  currentSectionSlug?: string;
+  currentQuestionId?: string;
+  violations?: Array<Omit<AssessmentViolationRecord, "occurredAt"> & { occurredAt: string }>;
+  questionDurations?: Record<string, number>;
+}) {
+  const { candidateObjectId, assessmentObjectId } = await getActiveCandidateForAssessment(
+    candidateId,
+    assessmentId,
+  );
+  const { attempts } = await getCollections();
+  const now = new Date();
+
+  const existingAttempt = await attempts.findOne({
+    candidateId: candidateObjectId,
+    assessmentId: assessmentObjectId,
+    submittedAt: { $exists: false },
+  });
+
+  if (!existingAttempt) {
+    throw new Error("This assessment attempt is already submitted or unavailable.");
+  }
+
+  const questionDeadlineUpdates =
+    currentQuestionId &&
+    questionDurations?.[currentQuestionId] !== undefined &&
+    !existingAttempt.questionDeadlines?.[currentQuestionId]
+      ? {
+          [`questionDeadlines.${currentQuestionId}`]: new Date(
+            now.getTime() +
+              Math.max(0, Math.round(questionDurations[currentQuestionId])) * 1000,
+          ),
+        }
+      : {};
+
+  const result = await attempts.findOneAndUpdate(
+    {
+      candidateId: candidateObjectId,
+      assessmentId: assessmentObjectId,
+      submittedAt: { $exists: false },
+    },
+    {
+      $set: {
+        status: "In Progress",
+        updatedAt: now,
+        answers,
+        questionStatuses,
+        ...(currentSectionSlug ? { currentSectionSlug } : {}),
+        ...(currentQuestionId ? { currentQuestionId } : {}),
+        ...questionDeadlineUpdates,
+        ...(violations
+          ? {
+              violations: violations.map((violation) => ({
+                ...violation,
+                occurredAt: new Date(violation.occurredAt),
+              })),
+            }
+          : {}),
+      },
+    },
+    { returnDocument: "after" },
+  );
+
+  if (!result) {
+    throw new Error("This assessment attempt is already submitted or unavailable.");
+  }
+
+  return toPublicAttempt(result);
 }
 
 export async function listHiringRecords() {
@@ -623,7 +966,7 @@ export async function createCandidateSubmission({
     throw new Error("Candidate or assessment is not valid.");
   }
 
-  const { candidates, submissions } = await getCollections();
+  const { candidates, submissions, attempts } = await getCollections();
   const candidateObjectId = new ObjectId(candidateId);
   const assessmentObjectId = new ObjectId(assessmentId);
   const candidate = await candidates.findOne({
@@ -644,6 +987,15 @@ export async function createCandidateSubmission({
   }
 
   const now = new Date();
+  const existingSubmission = await submissions.findOne(
+    { candidateId: candidateObjectId, assessmentId: assessmentObjectId },
+    { projection: { _id: 1 } },
+  );
+
+  if (existingSubmission) {
+    throw new Error("This assessment is already submitted and cannot be reopened.");
+  }
+
   const insert = await submissions.insertOne({
     assessmentId: assessmentObjectId,
     assessmentTitle,
@@ -663,29 +1015,47 @@ export async function createCandidateSubmission({
     reviews: [],
   });
 
-  if (candidate.assessmentIds?.length) {
-    const submittedAssessmentCount = await submissions.countDocuments({
-      candidateId: candidateObjectId,
-      assessmentId: { $in: candidate.assessmentIds },
-    });
+  const assignedAssessmentIds = candidate.assessmentIds?.length
+    ? candidate.assessmentIds
+    : [candidate.assessmentId];
+  const submittedAssessmentIds = await submissions
+    .find(
+      {
+        candidateId: candidateObjectId,
+        assessmentId: { $in: assignedAssessmentIds },
+      },
+      { projection: { assessmentId: 1 } },
+    )
+    .toArray();
 
-    if (submittedAssessmentCount >= candidate.assessmentIds.length) {
-      await candidates.updateOne(
-        { _id: candidateObjectId },
-        { $set: { submittedAt: now } },
-      );
-    }
-  } else {
+  if (submittedAssessmentIds.length >= assignedAssessmentIds.length) {
     await candidates.updateOne(
       { _id: candidateObjectId },
       { $set: { submittedAt: now } },
     );
   }
+
   const submission = await submissions.findOne({ _id: insert.insertedId });
 
   if (!submission) {
     throw new Error("Submission was saved but could not be loaded.");
   }
+
+  await attempts.updateOne(
+    { candidateId: candidateObjectId, assessmentId: assessmentObjectId },
+    {
+      $set: {
+        status: "Submitted",
+        submittedAt: now,
+        updatedAt: now,
+        answers,
+        violations: violations.map((violation) => ({
+          ...violation,
+          occurredAt: new Date(violation.occurredAt),
+        })),
+      },
+    },
+  );
 
   return toPublicSubmission(submission);
 }
@@ -714,7 +1084,7 @@ export async function addSubmissionReview({
   const { submissions } = await getCollections();
   const existingSubmission = await submissions.findOne(
     { _id: new ObjectId(submissionId) },
-    { projection: { decision: 1 } },
+    { projection: { decision: 1, evaluatedAt: 1, assessmentId: 1, answers: 1, textScores: 1 } },
   );
 
   if (!existingSubmission) {
@@ -723,6 +1093,10 @@ export async function addSubmissionReview({
 
   if (existingSubmission.decision) {
     throw new Error("This submission already has a final review decision.");
+  }
+
+  if (action === "evaluated" && existingSubmission.evaluatedAt) {
+    throw new Error("This submission has already been evaluated and cannot be evaluated again.");
   }
 
   const now = new Date();
@@ -734,6 +1108,17 @@ export async function addSubmissionReview({
     action,
     createdAt: now,
   };
+  const nextTextScores = textScores
+    ? { ...(existingSubmission.textScores ?? {}), ...textScores }
+    : existingSubmission.textScores;
+  const nextScore =
+    action === "evaluated"
+      ? await calculateSubmissionScore({
+          assessmentId: existingSubmission.assessmentId.toString(),
+          answers: existingSubmission.answers ?? {},
+          textScores: nextTextScores,
+        })
+      : score;
   const update: Parameters<Collection<SubmissionDocument>["updateOne"]>[1] = {
     $push: { reviews: review },
     $set: {
@@ -746,8 +1131,8 @@ export async function addSubmissionReview({
       ...(action === "accepted" || action === "rejected" || action === "forwarded"
         ? { decision: action }
         : {}),
-      ...(textScores ? { textScores } : {}),
-      ...(typeof score === "number" ? { score } : {}),
+      ...(nextTextScores ? { textScores: nextTextScores } : {}),
+      ...(typeof nextScore === "number" ? { score: nextScore } : {}),
     },
   };
 

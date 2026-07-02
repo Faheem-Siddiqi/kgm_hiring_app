@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, CheckCircle2, ClipboardList, Copy, Eye, Loader2, Save, Search, Send, Users, type LucideIcon } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ClipboardList, Copy, Loader2, Save, Search, Send, Users, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -148,7 +148,7 @@ export function AdminJobDetail({
   const [description, setDescription] = useState(job.description);
   const [responsibilities, setResponsibilities] = useState(job.responsibilities.join("\n"));
   const [requirements, setRequirements] = useState(job.requirements.join("\n"));
-  const [assessmentIds, setAssessmentIds] = useState(job.assessmentIds);
+  const [assessmentIds, setAssessmentIds] = useState(job.assessmentIds.slice(0, 1));
   const [currentStatus, setCurrentStatus] = useState(job.status);
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
@@ -226,7 +226,7 @@ export function AdminJobDetail({
 
   function buildCandidateLink(candidate: Candidate) {
     const origin = typeof window === "undefined" ? "" : window.location.origin;
-    return `${origin}/?otp=${candidate.otpCode}`;
+    return `${origin}/assessment/verify?otp=${candidate.otpCode}`;
   }
 
   async function copyText(value: string, successMessage: string) {
@@ -240,6 +240,11 @@ export function AdminJobDetail({
 
   async function saveJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (assessmentIds.length !== 1) {
+      toast.error("Select one assessment before saving the job.");
+      return;
+    }
+
     setSaving(true);
     const response = await fetch("/api/admin/jobs", {
       method: "PUT",
@@ -281,6 +286,7 @@ export function AdminJobDetail({
         body: JSON.stringify({
           candidateId: candidate.id,
           assessmentTitle,
+          inviteExpiresAt: candidate.inviteExpiresAt,
         }),
       });
       payload = (await response.json()) as CandidateInviteResponse;
@@ -353,6 +359,7 @@ export function AdminJobDetail({
         body: JSON.stringify({
           candidateId: candidate.id,
           assessmentTitle: job.title,
+          inviteExpiresAt: candidate.inviteExpiresAt,
         }),
       });
       payload = (await response.json()) as CandidateInviteResponse;
@@ -603,16 +610,11 @@ export function AdminJobDetail({
                     {assessments.map((assessment) => (
                       <label key={assessment.id} className="flex items-start gap-3 rounded-md border p-3 text-sm">
                         <input
-                          type="checkbox"
+                          type="radio"
+                          name="job-detail-assessment"
                           className="mt-1 size-4 accent-primary"
                           checked={assessmentIds.includes(assessment.id)}
-                          onChange={() =>
-                            setAssessmentIds((current) =>
-                              current.includes(assessment.id)
-                                ? current.filter((id) => id !== assessment.id)
-                                : [...current, assessment.id],
-                            )
-                          }
+                          onChange={() => setAssessmentIds([assessment.id])}
                         />
                         <span className="min-w-0">
                           <span className="block truncate font-medium">{assessment.code} · {assessment.name}</span>
@@ -638,9 +640,7 @@ export function AdminJobDetail({
               </CardHeader>
               <CardContent>
                 <form className="space-y-3" onSubmit={sendInvite}>
-                  <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
-                    The candidate will see {job.assessments.length} assessment{job.assessments.length === 1 ? "" : "s"} after login and can complete them one by one.
-                  </div>
+
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="candidate-name">Candidate name</Label>
@@ -651,15 +651,23 @@ export function AdminJobDetail({
                       <Input id="candidate-email" type="email" value={candidateEmail} onChange={(event) => setCandidateEmail(event.target.value)} />
                     </div>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 ">
                     <Label htmlFor="invite-expiry">Invitation expiry</Label>
                     <Input
-                      id="invite-expiry"
-                      type="date"
-                      value={inviteExpiryDate}
-                      min={new Date().toISOString().slice(0, 10)}
-                      onChange={(event) => setInviteExpiryDate(event.target.value)}
-                    />
+    id="invite-expiry"
+    type="date"
+    value={inviteExpiryDate}
+    min={new Date().toISOString().slice(0, 10)}
+    onChange={(event) => setInviteExpiryDate(event.target.value)}
+    className="
+      relative w-full pr-10
+      [&::-webkit-calendar-picker-indicator]:absolute
+      [&::-webkit-calendar-picker-indicator]:right-3
+      [&::-webkit-calendar-picker-indicator]:top-1/2
+      [&::-webkit-calendar-picker-indicator]:-translate-y-1/2
+      [&::-webkit-calendar-picker-indicator]:cursor-pointer
+    "
+  />
                   </div>
                   <Button type="submit" className="w-full" disabled={!job.assessments.length || sendingInvite}>
                     {sendingInvite ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
