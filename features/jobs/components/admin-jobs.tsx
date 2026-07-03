@@ -33,6 +33,10 @@ import { toast } from "sonner";
 
 
 
+
+
+
+
 import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +59,10 @@ import {
   type JobStatus,
   type PublicJob,
 } from "@/lib/job-types";
+
+
+
+
 
 
 
@@ -504,7 +512,7 @@ export function AdminJobs({
 
           <Button asChild>
             <Link href="/admin/assessments">
-              <ListPlus className="size-4" />
+            
               Create Assessment
             </Link>
           </Button>

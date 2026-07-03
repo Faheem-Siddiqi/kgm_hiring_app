@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Clock3,
   FileText,
-  Layers3,
   ListChecks,
   Loader2,
   LogOut,
@@ -149,9 +148,9 @@ function getQuestionTypeLabel(section: SectionPreview) {
   );
 
   const labels = [
-    counts.mcq ? `${counts.mcq} MCQ` : "",
-    counts.multi ? `${counts.multi} Multiple` : "",
-    counts.text ? `${counts.text} Text` : "",
+    counts.mcq ? `MCQ ${counts.mcq}` : "",
+    counts.multi ? `Multiple ${counts.multi}` : "",
+    counts.text ? `Text ${counts.text}` : "",
   ].filter(Boolean);
 
   return labels.length ? labels.join(" / ") : "Mixed questions";
@@ -394,25 +393,34 @@ export function TestOverview() {
   return (
     <>
       {isOpeningSection ? (
-        <div className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-muted">
-          <div className="h-full w-1/2 animate-pulse rounded-r-full bg-primary" />
-        </div>
+        <>
+          <div className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-muted">
+            <div className="h-full w-1/2 animate-pulse rounded-r-full bg-primary" />
+          </div>
+
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-background/70 backdrop-blur-[2px]">
+            <div className="flex items-center gap-3 rounded-md border bg-background px-4 py-3 text-sm shadow-sm">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              Opening assessment...
+            </div>
+          </div>
+        </>
       ) : null}
 
       <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <div className="space-y-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <Badge variant="secondary" className="mb-3 w-fit gap-2">
-                <ShieldCheck className="size-3.5" />
-                Candidate
+              <Badge variant="secondary" className="mb-3 w-fit gap-2 py-1 px-2">
+                <Clock3 className="size-3.5" />
+                Expires {expiryLabel}
               </Badge>
 
               <h1 className="text-3xl font-semibold tracking-tight">
                 {activeCandidate?.jobTitle ?? activeAssessment.role}
               </h1>
 
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              <p className="mt-2  text-sm leading-6 text-muted-foreground">
                 Review the instructions, check each section, and start when you
                 are ready. Your saved progress and timers continue from the
                 existing attempt.
@@ -439,33 +447,12 @@ export function TestOverview() {
                 </div>
 
                 <CardTitle>Important instructions</CardTitle>
-                <CardDescription className="max-w-3xl leading-6">
+                <CardDescription className=" leading-6">
                   Keep the test window open and in fullscreen. You may switch
                   sections, but timers do not restart after refresh, disconnect,
                   tab close, or reopening the link. Submitted sections cannot be
                   edited after time expires or after final submission.
                 </CardDescription>
-              </div>
-
-              <div className="grid gap-2 text-sm sm:grid-cols-3 md:min-w-[360px]">
-                <div className="rounded-md border bg-background p-3">
-                  <p className="text-xs text-muted-foreground">Questions</p>
-                  <p className="mt-1 text-xl font-semibold">{totalQuestions}</p>
-                </div>
-
-                <div className="rounded-md border bg-background p-3">
-                  <p className="text-xs text-muted-foreground">Total time</p>
-                  <p className="mt-1 text-xl font-semibold">
-                    {totalDuration} min
-                  </p>
-                </div>
-
-                <div className="rounded-md border bg-background p-3">
-                  <p className="text-xs text-muted-foreground">Expiry</p>
-                  <p className="mt-1 truncate text-sm font-semibold">
-                    {expiryLabel}
-                  </p>
-                </div>
               </div>
             </CardHeader>
           </Card>
@@ -517,28 +504,31 @@ export function TestOverview() {
                       key={assessment.id}
                       className="overflow-hidden shadow-none transition hover:border-primary/30"
                     >
-                      <CardHeader className="border-b bg-muted/20 p-4 sm:p-5">
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <CardHeader className="border-b bg-muted/20 py-[0.4rem]">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between ">
                           <div className="min-w-0">
-                            <CardTitle className="line-clamp-2 text-lg sm:text-xl">
-                              {activeCandidate.jobTitle ?? assessment.title}
-                            </CardTitle>
+                            <div className="flex lg:flex-row  w-fit items-start gap-2 flex-col pt-2">
+                              <CardTitle className="line-clamp-2 text-lg sm:text-xl ">
+                                {activeCandidate.jobTitle ?? assessment.title}
+                              </CardTitle>
 
-                            <CardDescription className="mt-1">
+                              <Badge
+                                variant="outline"
+                                className={`${meta.badgeClass}`}
+                              >
+                                <StatusIcon className="mr-1 size-3.5" />
+                                {meta.label}
+                              </Badge>
+                            </div>
+
+                            <CardDescription className=" mt-1">
                               Check section details before starting.
                             </CardDescription>
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge
-                              variant="outline"
-                              className={meta.badgeClass}
-                            >
-                              <StatusIcon className="mr-1 size-3.5" />
-                              {meta.label}
-                            </Badge>
-
+                          <div className="flex flex-wrap  items-center gap-2">
                             <Button
+className=' lg:my-5 mb-5'
                               disabled={!canOpen || isOpeningSection}
                               onClick={() => void openAssessment(assessment.id)}
                             >
@@ -557,44 +547,6 @@ export function TestOverview() {
                       </CardHeader>
 
                       <CardContent className="space-y-4 p-4 sm:p-5">
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          <div className="rounded-md border bg-background p-4">
-                            <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
-                              <Layers3 className="size-4" />
-                              Sections
-                            </div>
-
-                            <p className="mt-2 text-2xl font-semibold">
-                              {assessmentSections.length ||
-                                assessment.sectionCount}
-                            </p>
-                          </div>
-
-                          <div className="rounded-md border bg-background p-4">
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <Clock3 className="size-4" />
-                              Total time
-                            </div>
-
-                            <p className="mt-2 text-2xl font-semibold">
-                              {assessment.sectionCount *
-                                assessment.timePerSectionMinutes}{" "}
-                              min
-                            </p>
-                          </div>
-
-                          <div className="rounded-md border bg-background p-4">
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <ListChecks className="size-4" />
-                              Questions
-                            </div>
-
-                            <p className="mt-2 text-2xl font-semibold">
-                              {totalQuestions}
-                            </p>
-                          </div>
-                        </div>
-
                         <div className="space-y-3">
                           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                             <div>
@@ -610,7 +562,7 @@ export function TestOverview() {
 
                             <Badge
                               variant="secondary"
-                              className="w-fit rounded-full px-3"
+                              className="w-fit rounded-[6px] px-2"
                             >
                               {assessmentSections.length ||
                                 assessment.sectionCount}{" "}
@@ -618,7 +570,7 @@ export function TestOverview() {
                             </Badge>
                           </div>
 
-                          <div className="grid gap-2">
+                          <div className="flex flex-col gap-2">
                             {assessmentSections.map((section, sectionIndex) => {
                               const sectionOpeningKey = `${assessment.id}:${section.slug}`;
                               const isThisSectionOpening =
@@ -633,6 +585,10 @@ export function TestOverview() {
                                 sectionQuestionIds,
                               );
 
+                              const sectionNumber = String(
+                                sectionIndex + 1,
+                              ).padStart(2, "0");
+
                               return (
                                 <button
                                   key={`${assessment.id}-${section.slug}`}
@@ -644,38 +600,43 @@ export function TestOverview() {
                                       section.slug,
                                     )
                                   }
-                                  className="group grid w-full gap-4 rounded-md border bg-background p-4 text-left shadow-none transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+                                  className="group flex w-full flex-col gap-4 rounded-xl border bg-background p-4 text-left shadow-none transition-all hover:border-primary/40 hover:bg-primary/[0.03] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60 sm:p-5 lg:flex-row lg:items-center lg:justify-between"
                                 >
-                                  <div className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-muted/45 text-sm font-semibold text-muted-foreground transition-colors group-hover:border-primary/30 group-hover:bg-primary/10 group-hover:text-primary">
-                                    {String(sectionIndex + 1).padStart(2, "0")}
-                                  </div>
-
-                                  <div className="min-w-0 space-y-3">
-                                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                                  <div className="min-w-0 flex-1 space-y-4">
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                                       <div className="min-w-0">
-                                        <p className="truncate text-base font-semibold">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Badge
+                                            variant="outline"
+                                            className="rounded-md bg-muted/35 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                                          >
+                                            Section {sectionNumber}
+                                          </Badge>
+
+                                          <Badge
+                                            variant="outline"
+                                            className="rounded-md border-primary/15 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary"
+                                          >
+                                            {sectionAnsweredCount}/
+                                            {section.questions.length} saved
+                                          </Badge>
+                                        </div>
+
+                                        <p className="mt-2 truncate text-base font-semibold tracking-tight">
                                           {getSectionName(
                                             section,
                                             sectionIndex,
                                           )}
                                         </p>
 
-                                        <p className="mt-1 text-xs text-muted-foreground">
+                                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
                                           Section progress is saved automatically.
                                         </p>
                                       </div>
-
-                                      <Badge
-                                        variant="outline"
-                                        className="w-fit rounded-md border bg-muted/45 px-2.5 py-1 text-xs font-medium text-muted-foreground"
-                                      >
-                                        {sectionAnsweredCount}/
-                                        {section.questions.length} saved
-                                      </Badge>
                                     </div>
 
-                                    <div className="grid gap-2 sm:grid-cols-3">
-                                      <div className="rounded-md border bg-muted/45 p-3">
+                                    <div className="flex flex-col gap-3 text-sm sm:flex-row sm:flex-wrap sm:items-start">
+                                      <div className="min-w-[120px]">
                                         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                           <ListChecks className="size-3.5" />
                                           Questions
@@ -686,18 +647,18 @@ export function TestOverview() {
                                         </p>
                                       </div>
 
-                                      <div className="rounded-md border bg-muted/45 p-3">
+                                      <div className="min-w-[160px] sm:border-l sm:pl-4">
                                         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                           <FileText className="size-3.5" />
                                           Types
                                         </p>
 
-                                        <p className="mt-1 truncate text-sm font-semibold">
+                                        <p className="mt-1 max-w-[220px] truncate font-semibold">
                                           {getQuestionTypeLabel(section)}
                                         </p>
                                       </div>
 
-                                      <div className="rounded-md border bg-muted/45 p-3">
+                                      <div className="min-w-[120px] sm:border-l sm:pl-4">
                                         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                           <Clock3 className="size-3.5" />
                                           Total time
@@ -713,7 +674,7 @@ export function TestOverview() {
                                     </div>
                                   </div>
 
-                                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                                  <div className="flex size-9 shrink-0 items-center justify-center self-end rounded-lg bg-muted text-muted-foreground transition-colors group-hover:bg-primary group-hover:text-primary-foreground lg:self-center">
                                     {isThisSectionOpening ? (
                                       <Loader2 className="size-4 animate-spin" />
                                     ) : (
@@ -731,15 +692,15 @@ export function TestOverview() {
                 })}
               </div>
 
-              <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+              <aside className="space-y-4 lg:sticky lg:top-5 lg:self-start">
                 <Card className="overflow-hidden shadow-none">
                   <CardHeader className="border-b bg-muted/20">
                     <CardTitle>Overview</CardTitle>
-                    <CardDescription>{activeAssessment.title}</CardDescription>
+                    <CardDescription>Assessment Overview</CardDescription>
                   </CardHeader>
 
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2 rounded-md border bg-muted/30 p-4">
+                  <CardContent className="space-y-4 py-5">
+                    <div className=" space-y-2 rounded-md border bg-muted/30 p-4">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground">
                           Saved answers
@@ -749,7 +710,7 @@ export function TestOverview() {
                         </span>
                       </div>
 
-                      <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div className="h-1  overflow-hidden rounded-full bg-muted">
                         <div
                           className="h-full rounded-full bg-primary transition-all"
                           style={{ width: `${completionPercent}%` }}
@@ -836,4 +797,4 @@ export function TestOverview() {
       </Dialog>
     </>
   );
-}
+} 

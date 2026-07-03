@@ -3,9 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   BarChart3,
+  Bell,
   BriefcaseBusiness,
-  CheckCircle2,
-  Users,
+  Clock3,
+  FileCheck2,
+  Mail,
+  ShieldAlert,
+  Target,
+  TimerReset,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -33,6 +38,7 @@ import type {
   PublicAssessment,
 } from "@/lib/assessment-types";
 import type { PublicJob } from "@/lib/job-types";
+import { cn } from "@/lib/utils";
 
 type AdminSnapshot = {
   candidates?: Candidate[];
@@ -49,6 +55,24 @@ type AdminNotification = {
   href?: string;
 };
 
+type DashboardInvite = {
+  id: string;
+  name: string;
+  email: string;
+  jobTitle: string;
+  invitedAt: string;
+  inviteExpiresAt: string;
+  isInviteExpired: boolean;
+  submittedAt?: string;
+};
+
+type AssessmentDashboardStats = {
+  invited: number;
+  submissions: number;
+  averageScore: number;
+  completionRate: number;
+};
+
 type AdminDashboardProps = {
   initialServerAssessments?: PublicAssessment[];
   initialServerAssessmentSummary?: AssessmentListSummary;
@@ -58,25 +82,30 @@ type AdminDashboardProps = {
     averageScore: number;
     assessments: Record<string, { invited: number; submissions: number; averageScore: number }>;
     submissionStats: Record<string, { submissions: number; averageScore: number }>;
-    recentInvites?: Array<{
-      id: string;
-      name: string;
-      email: string;
-      jobTitle: string;
-      invitedAt: string;
-      inviteExpiresAt: string;
-      isInviteExpired: boolean;
-      submittedAt?: string;
-    }>;
+    recentInvites?: DashboardInvite[];
   };
 };
 
 const READ_NOTIFICATIONS_KEY = "kgm-hiring-admin-read-notifications";
+const TABLE_PAGE_SIZE = 6;
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
     dateStyle: "medium",
   }).format(new Date(value));
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value)}%`;
+}
+
+function clampPercent(value: number) {
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function getDaysUntil(value: string) {
+  const difference = new Date(value).getTime() - Date.now();
+  return Math.ceil(difference / (24 * 60 * 60 * 1000));
 }
 
 function useAdminData(enabled = true) {
@@ -113,9 +142,7 @@ function useAdminData(enabled = true) {
 }
 
 function getAverageScore(results: AssessmentResult[]) {
-  if (!results.length) {
-    return 0;
-  }
+  if (!results.length) return 0;
 
   return Math.round(
     results.reduce((total, result) => total + result.score, 0) /
@@ -127,21 +154,36 @@ function getAssessmentStats(
   job: JobAssessment,
   candidates: Candidate[],
   results: AssessmentResult[],
-) {
-  const assignedCandidates = candidates.filter(
-    (candidate) => candidate.jobId === job.id,
-  );
-  const assessmentResults = results.filter(
-    (result) => result.assessmentId === job.id,
-  );
+  initialHiringStats?: AdminDashboardProps["initialHiringStats"],
+): AssessmentDashboardStats {
+  if (candidates.length || results.length) {
+    const assignedCandidates = candidates.filter(
+      (candidate) => candidate.jobId === job.id,
+    );
+    const assessmentResults = results.filter(
+      (result) => result.assessmentId === job.id,
+    );
+
+    return {
+      invited: assignedCandidates.length,
+      submissions: assessmentResults.length,
+      averageScore: getAverageScore(assessmentResults),
+      completionRate: assignedCandidates.length
+        ? Math.round((assessmentResults.length / assignedCandidates.length) * 100)
+        : 0,
+    };
+  }
+
+  const inviteStats = initialHiringStats?.assessments[job.id];
+  const submissionStats = initialHiringStats?.submissionStats[job.id];
+  const invited = inviteStats?.invited ?? 0;
+  const submissions = submissionStats?.submissions ?? 0;
 
   return {
-    assignedCandidates,
-    assessmentResults,
-    averageScore: getAverageScore(assessmentResults),
-    completionRate: assignedCandidates.length
-      ? Math.round((assessmentResults.length / assignedCandidates.length) * 100)
-      : 0,
+    invited,
+    submissions,
+    averageScore: submissionStats?.averageScore ?? 0,
+    completionRate: invited ? Math.round((submissions / invited) * 100) : 0,
   };
 }
 
@@ -169,7 +211,7 @@ function buildAdminNotifications(
     .map((candidate) => ({
       id: `invite-${candidate.id}`,
       title: "Invite awaiting submission",
-      description: `${candidate.name} has OTP ${candidate.otpCode}`,
+      description: `${candidate.name} has an active candidate invite`,
       time: formatDate(candidate.invitedAt),
       tone: "default",
       href: `/admin/assessment/${candidate.jobId}`,
@@ -193,9 +235,7 @@ function buildAdminNotifications(
 }
 
 function readNotificationIds() {
-  if (typeof window === "undefined") {
-    return [];
-  }
+  if (typeof window === "undefined") return [];
 
   try {
     return JSON.parse(
@@ -242,6 +282,133 @@ function toDashboardAssessment(assessment: PublicAssessment): JobAssessment {
   };
 }
 
+function PaginatedControls({
+  page,
+  totalPages,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 border-t px-4 py-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+      <span>
+        Page {Math.min(page, totalPages)} of {totalPages}
+      </span>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+        >
+          Previous
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  detail,
+  icon: Icon,
+}: {
+  label: string;
+  value: string | number;
+  detail: string;
+  icon: typeof BarChart3;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm text-muted-foreground">{label}</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight">{value}</p>
+          </div>
+          <span className="rounded-md border bg-muted/35 p-2 text-muted-foreground">
+            <Icon className="size-4" />
+          </span>
+        </div>
+        <p className="mt-4 text-xs leading-5 text-muted-foreground">{detail}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function HorizontalBar({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: number;
+  detail: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="truncate font-medium">{label}</span>
+        <span className="shrink-0 text-muted-foreground">{detail}</span>
+      </div>
+      <div className="h-3 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-foreground transition-all"
+          style={{ width: `${clampPercent(value)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ScoreDistribution({ results }: { results: AssessmentResult[] }) {
+  const buckets = [
+    { label: "0-39", min: 0, max: 39 },
+    { label: "40-59", min: 40, max: 59 },
+    { label: "60-79", min: 60, max: 79 },
+    { label: "80-100", min: 80, max: 100 },
+  ].map((bucket) => ({
+    ...bucket,
+    count: results.filter(
+      (result) => result.score >= bucket.min && result.score <= bucket.max,
+    ).length,
+  }));
+  const maxCount = Math.max(1, ...buckets.map((bucket) => bucket.count));
+
+  return (
+    <div className="grid h-64 grid-cols-4 items-end gap-3 rounded-md border bg-muted/20 p-4">
+      {buckets.map((bucket) => (
+        <div key={bucket.label} className="flex h-full flex-col justify-end gap-2">
+          <div className="flex min-h-0 flex-1 items-end">
+            <div
+              className="w-full rounded-t-md bg-foreground"
+              style={{
+                height: `${bucket.count ? Math.max(12, (bucket.count / maxCount) * 100) : 4}%`,
+              }}
+              title={`${bucket.count} submissions scored ${bucket.label}`}
+            />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium">{bucket.count}</p>
+            <p className="text-xs text-muted-foreground">{bucket.label}%</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AdminDashboard({
   initialServerAssessments = [],
   initialServerAssessmentSummary,
@@ -249,6 +416,8 @@ export function AdminDashboard({
   initialHiringStats,
 }: AdminDashboardProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [invitePage, setInvitePage] = useState(1);
+  const [assessmentPage, setAssessmentPage] = useState(1);
   const [readNotifications, setReadNotifications] = useState<string[]>(() =>
     readNotificationIds(),
   );
@@ -270,9 +439,9 @@ export function AdminDashboard({
   const averageScore = results.length
     ? getAverageScore(results)
     : initialHiringStats?.averageScore ?? 0;
-  const dashboardInvites =
+  const dashboardInvites: DashboardInvite[] =
     candidates.length
-      ? candidates.slice(0, 8).map((candidate) => ({
+      ? candidates.map((candidate) => ({
           id: candidate.id,
           name: candidate.name,
           email: candidate.email,
@@ -286,6 +455,61 @@ export function AdminDashboard({
   const assessmentCount =
     jobs.length || initialServerAssessmentSummary?.total || dashboardJobs.length;
   const publicJobCount = initialPublicJobs.length;
+  const totalInvites = dashboardInvites.length
+    ? dashboardInvites.length
+    : Object.values(initialHiringStats?.assessments ?? {}).reduce(
+        (total, item) => total + item.invited,
+        0,
+      );
+  const submittedInvites = dashboardInvites.filter((invite) => invite.submittedAt).length ||
+    initialHiringStats?.submissions ||
+    0;
+  const activeInvites = dashboardInvites.filter(
+    (invite) => !invite.submittedAt && !invite.isInviteExpired,
+  ).length;
+  const expiredInvites = dashboardInvites.filter(
+    (invite) => !invite.submittedAt && invite.isInviteExpired,
+  ).length;
+  const completionRate = totalInvites
+    ? Math.round((submittedInvites / totalInvites) * 100)
+    : 0;
+  const pendingReview = results.filter(
+    (result) => !result.decision && !result.evaluatedAt,
+  ).length;
+  const autoSubmitted = results.filter(
+    (result) => result.status === "Auto submitted",
+  ).length;
+  const totalViolations = results.reduce(
+    (total, result) => total + result.violations.length,
+    0,
+  );
+  const jobsWithAssessments = initialPublicJobs.filter(
+    (job) => job.assessmentIds.length,
+  ).length;
+  const jobCoverage = publicJobCount
+    ? Math.round((jobsWithAssessments / publicJobCount) * 100)
+    : 0;
+  const assessmentRows = dashboardJobs.map((job) => ({
+    job,
+    stats: getAssessmentStats(job, candidates, results, initialHiringStats),
+  }));
+  const topAssessments = [...assessmentRows]
+    .sort((first, second) => second.stats.invited - first.stats.invited)
+    .slice(0, 5);
+  const highestAverage = [...assessmentRows]
+    .filter((row) => row.stats.submissions)
+    .sort((first, second) => second.stats.averageScore - first.stats.averageScore)
+    .slice(0, 5);
+  const inviteTotalPages = Math.max(1, Math.ceil(dashboardInvites.length / TABLE_PAGE_SIZE));
+  const assessmentTotalPages = Math.max(1, Math.ceil(assessmentRows.length / TABLE_PAGE_SIZE));
+  const pagedInvites = dashboardInvites.slice(
+    (invitePage - 1) * TABLE_PAGE_SIZE,
+    invitePage * TABLE_PAGE_SIZE,
+  );
+  const pagedAssessments = assessmentRows.slice(
+    (assessmentPage - 1) * TABLE_PAGE_SIZE,
+    assessmentPage * TABLE_PAGE_SIZE,
+  );
 
   function markNotificationRead(id: string) {
     setReadNotifications((current) => {
@@ -399,7 +623,7 @@ export function AdminDashboard({
               ) : null}
             </div>
             <div className="border-t p-5">
-              <Button asChild className="w-full " variant="outline">
+              <Button asChild className="w-full" variant="outline">
                 <Link href="/admin/notifications" onClick={() => setNotificationsOpen(false)}>
                   View all notifications
                 </Link>
@@ -410,201 +634,449 @@ export function AdminDashboard({
       />
 
       <section className="mx-auto w-full max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-        <div id="overview" className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
           <div className="space-y-4">
             <Badge variant="secondary" className="w-fit gap-2">
               <BarChart3 className="size-3.5" />
-              Hiring operations
+              Kohinoor Textile Mills Gijar Khan
             </Badge>
             <div className="space-y-3">
               <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-                Recruitment assessment workspace
+                Candidate invitation and assessment dashboard
               </h1>
               <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-                Track assessment activity, review submissions, and open focused
-                analytics for each configured assessment.
+                Monitor the full flow from job setup to candidate invitations,
+                assessment completion, scoring, and review decisions.
               </p>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <Link href="/admin/jobs">
+                  Manage jobs
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/admin/submissions">Review submissions</Link>
+              </Button>
+            </div>
           </div>
+
           <Card>
             <CardHeader>
               <CardTitle>Pipeline health</CardTitle>
-              <CardDescription>Current assessment activity at a glance.</CardDescription>
+              <CardDescription>
+                How effectively invitations are turning into submitted assessments.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-3">
+            <CardContent className="space-y-4">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">Completion rate</p>
+                  <p className="text-4xl font-semibold tracking-tight">
+                    {formatPercent(completionRate)}
+                  </p>
+                </div>
+                <Badge variant={completionRate >= 70 ? "default" : "secondary"}>
+                  {submittedInvites} submitted
+                </Badge>
+              </div>
+              <Progress value={completionRate} />
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <div className="rounded-md border p-3">
+                  <p className="font-medium">{activeInvites}</p>
+                  <p className="text-xs text-muted-foreground">Active</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="font-medium">{expiredInvites}</p>
+                  <p className="text-xs text-muted-foreground">Expired</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="font-medium">{pendingReview}</p>
+                  <p className="text-xs text-muted-foreground">Review due</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            label="Jobs published"
+            value={publicJobCount}
+            detail={`${jobsWithAssessments} jobs have assessments attached`}
+            icon={BriefcaseBusiness}
+          />
+          <StatCard
+            label="Assessments ready"
+            value={assessmentCount}
+            detail={`${jobCoverage}% job coverage across active and inactive jobs`}
+            icon={FileCheck2}
+          />
+          <StatCard
+            label="Candidate invites"
+            value={totalInvites}
+            detail={`${activeInvites} active, ${expiredInvites} expired, ${submittedInvites} completed`}
+            icon={Mail}
+          />
+          <StatCard
+            label="Average score"
+            value={`${averageScore}%`}
+            detail={`${autoSubmitted} auto-submitted attempts, ${totalViolations} total violations`}
+            icon={Target}
+          />
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+          <Card>
+            <CardHeader>
+              <CardTitle>Invitation funnel</CardTitle>
+              <CardDescription>
+                Candidate movement from invite creation to completed assessments.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <HorizontalBar
+                label="Invited candidates"
+                value={100}
+                detail={`${totalInvites} total`}
+              />
+              <HorizontalBar
+                label="Active invites"
+                value={totalInvites ? (activeInvites / totalInvites) * 100 : 0}
+                detail={`${activeInvites} active`}
+              />
+              <HorizontalBar
+                label="Submitted assessments"
+                value={completionRate}
+                detail={`${submittedInvites} submitted`}
+              />
+              <HorizontalBar
+                label="Expired without submission"
+                value={totalInvites ? (expiredInvites / totalInvites) * 100 : 0}
+                detail={`${expiredInvites} expired`}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Score distribution</CardTitle>
+              <CardDescription>
+                Submission quality grouped into easy-to-read score bands.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {results.length ? (
+                <ScoreDistribution results={results} />
+              ) : (
+                <div className="flex h-64 items-center justify-center rounded-md border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                  Score bands will appear after candidate submissions are available.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Most invited assessments</CardTitle>
+              <CardDescription>
+                The roles currently receiving the most candidate traffic.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {topAssessments.map(({ job, stats }) => (
+                <HorizontalBar
+                  key={job.id}
+                  label={job.title}
+                  value={totalInvites ? (stats.invited / totalInvites) * 100 : 0}
+                  detail={`${stats.invited} invites`}
+                />
+              ))}
+              {!topAssessments.length ? (
+                <div className="rounded-md border bg-muted/20 p-6 text-sm text-muted-foreground">
+                  Create assessments and send invitations to populate this chart.
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Highest assessment averages</CardTitle>
+              <CardDescription>
+                Average scores by assessment for submitted candidate attempts.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {highestAverage.map(({ job, stats }) => (
+                <HorizontalBar
+                  key={job.id}
+                  label={job.title}
+                  value={stats.averageScore}
+                  detail={`${stats.averageScore}% avg`}
+                />
+              ))}
+              {!highestAverage.length ? (
+                <div className="rounded-md border bg-muted/20 p-6 text-sm text-muted-foreground">
+                  Assessment averages will appear once candidates submit tests.
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+          <Card className="overflow-hidden">
+            <CardHeader>
+              <CardTitle>Candidate invitation tracker</CardTitle>
+              <CardDescription>
+                Recent job assessment invitations with clear expiry and submission state.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px] text-sm">
+                  <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Candidate</th>
+                      <th className="px-4 py-3 font-medium">Job assessment</th>
+                      <th className="px-4 py-3 font-medium">Invited</th>
+                      <th className="px-4 py-3 font-medium">Expiry</th>
+                      <th className="px-4 py-3 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {pagedInvites.map((invite) => {
+                      const daysUntilExpiry = getDaysUntil(invite.inviteExpiresAt);
+                      return (
+                        <tr key={invite.id} className="bg-background">
+                          <td className="px-4 py-3">
+                            <p className="font-medium">{invite.name}</p>
+                            <p className="text-xs text-muted-foreground">{invite.email}</p>
+                          </td>
+                          <td className="px-4 py-3">{invite.jobTitle}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {formatDate(invite.invitedAt)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-muted-foreground">
+                              {formatDate(invite.inviteExpiresAt)}
+                            </p>
+                            {!invite.submittedAt && !invite.isInviteExpired ? (
+                              <p className="text-xs text-muted-foreground">
+                                {daysUntilExpiry <= 1 ? "Due soon" : `${daysUntilExpiry} days left`}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge
+                              variant={
+                                invite.submittedAt
+                                  ? "default"
+                                  : invite.isInviteExpired
+                                    ? "outline"
+                                    : "secondary"
+                              }
+                            >
+                              {invite.submittedAt
+                                ? "Submitted"
+                                : invite.isInviteExpired
+                                  ? "Expired"
+                                  : "Active"}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!pagedInvites.length ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                          Candidate assessment invites will appear here.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+              <PaginatedControls
+                page={invitePage}
+                totalPages={inviteTotalPages}
+                onPageChange={setInvitePage}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Operational alerts</CardTitle>
+              <CardDescription>
+                Fast signals for the actions an admin should check first.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
               {[
                 {
-                  label: "Assessments",
-                  value: assessmentCount,
-                  icon: BriefcaseBusiness,
+                  label: "Pending manual review",
+                  value: pendingReview,
+                  icon: Bell,
+                  href: "/admin/submissions",
                 },
                 {
-                  label: "Open jobs",
-                  value: publicJobCount,
-                  icon: Users,
+                  label: "Expired candidate invites",
+                  value: expiredInvites,
+                  icon: TimerReset,
+                  href: "/admin/jobs",
                 },
                 {
-                  label: "Submissions",
-                  value: results.length || initialHiringStats?.submissions || 0,
-                  icon: CheckCircle2,
+                  label: "Auto-submitted attempts",
+                  value: autoSubmitted,
+                  icon: Clock3,
+                  href: "/admin/submissions",
                 },
                 {
-                  label: "Avg. score",
-                  value: `${averageScore}%`,
-                  icon: BarChart3,
+                  label: "Integrity violations",
+                  value: totalViolations,
+                  icon: ShieldAlert,
+                  href: "/admin/submissions",
                 },
-              ].map(({ label, value, icon: Icon }) => (
-                <div key={label} className="rounded-md border p-4">
-                  <Icon className="mb-3 size-4 text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="mt-1 text-2xl font-semibold">{value}</p>
-                </div>
+              ].map((item) => (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="group flex items-center justify-between gap-4 rounded-lg border p-4 transition hover:border-foreground/30 hover:bg-muted/35"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="rounded-md border bg-muted/35 p-2 text-muted-foreground">
+                      <item.icon className="size-4" />
+                    </span>
+                    <span className="truncate text-sm font-medium">{item.label}</span>
+                  </div>
+                  <span className="flex shrink-0 items-center gap-2 text-sm font-semibold">
+                    {item.value}
+                    <ArrowRight className="size-4 text-muted-foreground transition group-hover:translate-x-0.5" />
+                  </span>
+                </Link>
               ))}
             </CardContent>
           </Card>
         </div>
 
-        <div id="assessments" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Candidate invites</CardTitle>
-                <CardDescription>
-                  Recent assessment invitations with candidate, job, and expiry status.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-hidden rounded-md border">
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-sm">
-                      <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                        <tr>
-                          <th className="px-4 py-3 font-medium">Candidate</th>
-                          <th className="px-4 py-3 font-medium">Job</th>
-                          <th className="px-4 py-3 font-medium">Invited</th>
-                          <th className="px-4 py-3 font-medium">Expires</th>
-                          <th className="px-4 py-3 font-medium">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {dashboardInvites.map((invite) => (
-                          <tr key={invite.id} className="bg-background">
-                            <td className="px-4 py-3">
-                              <p className="font-medium">{invite.name}</p>
-                              <p className="text-xs text-muted-foreground">{invite.email}</p>
-                            </td>
-                            <td className="px-4 py-3">{invite.jobTitle}</td>
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(invite.invitedAt)}
-                            </td>
-                            <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(invite.inviteExpiresAt)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <Badge
-                                variant={
-                                  invite.submittedAt
-                                    ? "default"
-                                    : invite.isInviteExpired
-                                      ? "outline"
-                                      : "secondary"
-                                }
-                              >
-                                {invite.submittedAt
-                                  ? "Submitted"
-                                  : invite.isInviteExpired
-                                    ? "Expired"
-                                    : "Active"}
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                        {!dashboardInvites.length ? (
-                          <tr>
-                            <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                              Candidate assessment invites will appear here.
-                            </td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
+        <Card className="overflow-hidden">
+          <CardHeader>
+            <CardTitle>Assessment performance table</CardTitle>
+            <CardDescription>
+              Paginated assessment analytics with invitation volume, completion, score, and test structure.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Assessment</th>
+                    <th className="px-4 py-3 font-medium">Invited</th>
+                    <th className="px-4 py-3 font-medium">Submitted</th>
+                    <th className="px-4 py-3 font-medium">Completion</th>
+                    <th className="px-4 py-3 font-medium">Avg. score</th>
+                    <th className="px-4 py-3 font-medium">Structure</th>
+                    <th className="px-4 py-3 font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {pagedAssessments.map(({ job, stats }) => (
+                    <tr key={job.id} className="bg-background align-top">
+                      <td className="px-4 py-4">
+                        <p className="font-medium">{job.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {job.role} - created {formatDate(job.createdAt)}
+                        </p>
+                      </td>
+                      <td className="px-4 py-4">{stats.invited}</td>
+                      <td className="px-4 py-4">{stats.submissions}</td>
+                      <td className="px-4 py-4">
+                        <div className="w-36 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{formatPercent(stats.completionRate)}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {stats.submissions}/{stats.invited || 0}
+                            </span>
+                          </div>
+                          <Progress value={stats.completionRate} />
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">{stats.averageScore}%</td>
+                      <td className="px-4 py-4">
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge variant="outline">{job.sectionCount} sections</Badge>
+                          <Badge variant="outline">{job.questionsPerTest} questions</Badge>
+                          <Badge variant="outline">{job.timePerSectionMinutes} min</Badge>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">
+                        <Button asChild size="sm" variant="outline">
+                          <Link href={`/admin/assessment/${job.id}`}>
+                            Open
+                            <ArrowRight className="size-4" />
+                          </Link>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!pagedAssessments.length ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        Assessments will appear here after setup.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <PaginatedControls
+              page={assessmentPage}
+              totalPages={assessmentTotalPages}
+              onPageChange={setAssessmentPage}
+            />
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-6 lg:grid-cols-3">
+          {assessmentRows.slice(0, 3).map(({ job, stats }) => (
+            <Link
+              key={job.id}
+              href={`/admin/assessment/${job.id}`}
+              className={cn(
+                "group rounded-lg border bg-card p-5 text-card-foreground shadow-xs transition",
+                "hover:border-foreground/30 hover:bg-muted/35",
+              )}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{job.title}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{job.role}</p>
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Assessments</CardTitle>
-                <CardDescription>
-                  Open one assessment to view its own KPIs, graphs, candidates,
-                  and CV preview.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {dashboardJobs.map((job) => {
-                  const aggregateStats = initialHiringStats?.assessments[job.id];
-                  const aggregateSubmissions = initialHiringStats?.submissionStats[job.id];
-                  const stats = candidates.length || results.length
-                    ? getAssessmentStats(job, candidates, results)
-                    : {
-                        assignedCandidates: Array.from({ length: aggregateStats?.invited ?? 0 }),
-                        assessmentResults: Array.from({ length: aggregateSubmissions?.submissions ?? 0 }),
-                        averageScore: aggregateSubmissions?.averageScore ?? 0,
-                        completionRate: aggregateStats?.invited
-                          ? Math.round(((aggregateSubmissions?.submissions ?? 0) / aggregateStats.invited) * 100)
-                          : 0,
-                      };
-
-                  return (
-                    <Link
-                      key={job.id}
-                      href={`/admin/assessment/${job.id}`}
-                      className="group block rounded-lg border p-4 transition hover:border-foreground/30 hover:bg-muted/35"
-                    >
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0 space-y-1">
-                          <p className="font-medium">{job.title}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {job.role} - created {formatDate(job.createdAt)}
-                          </p>
-                        </div>
-                        <span className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition group-hover:bg-accent sm:w-auto">
-                          Open analytics
-                          <ArrowRight className="size-4" />
-                        </span>
-                      </div>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                        <div>
-                          <p className="text-xs text-muted-foreground">Invited</p>
-                          <p className="text-lg font-semibold">
-                            {stats.assignedCandidates.length}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Complete</p>
-                          <p className="text-lg font-semibold">
-                            {stats.completionRate}%
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">Avg. score</p>
-                          <p className="text-lg font-semibold">
-                            {stats.averageScore}%
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-4 grid gap-2 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-4">
-                        <span>{job.sectionCount} sections</span>
-                        <span>{job.timePerSectionMinutes} min each</span>
-                        <span>{job.questionsPerSection} questions each</span>
-                        <span>{job.questionsPerTest} total questions</span>
-                      </div>
-                      <Progress className="mt-4" value={stats.completionRate} />
-                    </Link>
-                  );
-                })}
-              </CardContent>
-            </Card>
+                <ArrowRight className="size-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" />
+              </div>
+              <div className="mt-5 grid grid-cols-3 gap-3 text-sm">
+                <div>
+                  <p className="font-semibold">{stats.invited}</p>
+                  <p className="text-xs text-muted-foreground">Invited</p>
+                </div>
+                <div>
+                  <p className="font-semibold">{stats.completionRate}%</p>
+                  <p className="text-xs text-muted-foreground">Complete</p>
+                </div>
+                <div>
+                  <p className="font-semibold">{stats.averageScore}%</p>
+                  <p className="text-xs text-muted-foreground">Avg.</p>
+                </div>
+              </div>
+              <Progress className="mt-4" value={stats.completionRate} />
+            </Link>
+          ))}
         </div>
       </section>
     </main>
