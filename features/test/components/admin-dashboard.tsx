@@ -112,6 +112,7 @@ function getDaysUntil(value: string) {
 
 function useAdminData(enabled = true) {
   const [adminData, setAdminData] = useState<AdminSnapshot>({});
+  const [isLoading, setIsLoading] = useState(enabled);
 
   useEffect(() => {
     if (!enabled) return;
@@ -123,9 +124,13 @@ function useAdminData(enabled = true) {
         const data = await fetchAdminDataSnapshot();
         if (active) {
           setAdminData({ candidates: data.candidates, results: data.results });
+          setIsLoading(false);
         }
       } catch {
-        if (active) setAdminData({});
+        if (active) {
+          setAdminData({});
+          setIsLoading(false);
+        }
       }
     }
 
@@ -140,6 +145,7 @@ function useAdminData(enabled = true) {
     candidates: adminData.candidates ?? [],
     jobs: adminData.jobs ?? [],
     results: adminData.results ?? [],
+    isLoading,
   };
 }
 
@@ -465,6 +471,42 @@ function DashboardSkeletonBlock({ className = "" }: { className?: string }) {
   return <div className={cn("animate-pulse rounded-md bg-muted", className)} />;
 }
 
+function ScoreDistributionSkeleton() {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 rounded-md border bg-muted/15 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-2">
+          <DashboardSkeletonBlock className="h-4 w-24" />
+          <DashboardSkeletonBlock className="h-3 w-20" />
+        </div>
+        <div className="space-y-2 sm:flex sm:flex-col sm:items-end">
+          <DashboardSkeletonBlock className="h-7 w-12" />
+          <DashboardSkeletonBlock className="h-3 w-20" />
+        </div>
+      </div>
+      <div className="grid h-64 grid-cols-4 items-end gap-3 rounded-md border bg-muted/20 p-4">
+        {[38, 56, 76, 92].map((height, index) => (
+          <div key={index} className="flex h-full flex-col justify-end gap-2">
+            <div className="flex min-h-0 flex-1 items-end">
+              <div
+                className="w-full animate-pulse rounded-t-md bg-muted"
+                style={{ height: `${height}%` }}
+              />
+            </div>
+            <DashboardSkeletonBlock className="mx-auto h-4 w-8" />
+            <DashboardSkeletonBlock className="mx-auto h-3 w-12" />
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <DashboardSkeletonBlock key={index} className="h-12" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AdminDashboardSkeleton() {
   return (
     <main className="min-h-svh bg-background text-foreground">
@@ -523,7 +565,7 @@ export function AdminDashboard({
   const [readNotifications, setReadNotifications] = useState<string[]>(() =>
     readNotificationIds(),
   );
-  const { candidates, jobs, results } = useAdminData(true);
+  const { candidates, jobs, results, isLoading } = useAdminData(true);
   const dashboardJobs = useMemo(
     () =>
       jobs.length
@@ -893,6 +935,8 @@ export function AdminDashboard({
             <CardContent>
               {results.length ? (
                 <ScoreDistribution results={results} />
+              ) : isLoading ? (
+                <ScoreDistributionSkeleton />
               ) : (
                 <div className="flex h-64 items-center justify-center rounded-md border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
                   Score bands will appear after candidate submissions are available.

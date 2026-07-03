@@ -139,6 +139,43 @@ type StatItem = {
   icon: LucideIcon;
 };
 
+function JobScoreDistributionSkeleton() {
+  return (
+    <div className="rounded-md border p-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <div className="h-4 w-44 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-64 max-w-full animate-pulse rounded bg-muted" />
+        </div>
+        <div className="rounded-md border bg-muted/20 px-3 py-2">
+          <div className="h-3 w-20 animate-pulse rounded bg-muted" />
+          <div className="mt-2 h-5 w-24 animate-pulse rounded bg-muted" />
+          <div className="mt-2 h-3 w-16 animate-pulse rounded bg-muted" />
+        </div>
+      </div>
+      <div className="grid h-48 grid-cols-4 items-end gap-3 rounded-md bg-muted/20 p-3">
+        {[35, 52, 74, 90].map((height, index) => (
+          <div key={index} className="flex h-full flex-col justify-end gap-2">
+            <div className="flex min-h-0 flex-1 items-end">
+              <div
+                className="w-full animate-pulse rounded-t-md bg-muted"
+                style={{ height: `${height}%` }}
+              />
+            </div>
+            <div className="mx-auto h-4 w-8 animate-pulse rounded bg-muted" />
+            <div className="mx-auto h-3 w-12 animate-pulse rounded bg-muted" />
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="h-12 animate-pulse rounded-md bg-muted" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AdminJobDetail({
   job,
   assessments,
@@ -781,7 +818,7 @@ export function AdminJobDetail({
                       </div>
                     ))}
                   </div>
-                  <div className="h-52 animate-pulse rounded-md border bg-muted/40" />
+                  <JobScoreDistributionSkeleton />
                 </div>
               ) : (
                 <>
