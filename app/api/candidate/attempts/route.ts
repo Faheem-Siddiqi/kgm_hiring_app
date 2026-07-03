@@ -37,7 +37,7 @@ export const PATCH = withErrorHandler(async (request: Request) => {
     candidateId?: string;
     assessmentId?: string;
     answers?: Record<string, string>;
-    questionStatuses?: Record<string, "skipped" | "unanswered">;
+    questionStatuses?: Record<string, "answered" | "skipped" | "unanswered">;
     currentSectionSlug?: string;
     currentQuestionId?: string;
     questionDurations?: Record<string, number>;

@@ -73,7 +73,7 @@ type CandidateAttemptDocument = {
   currentSectionSlug?: string;
   currentQuestionId?: string;
   answers: Record<string, string>;
-  questionStatuses: Record<string, "skipped" | "unanswered">;
+  questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
   sectionDeadlines: Record<string, Date>;
   questionDeadlines: Record<string, Date>;
   violations: AssessmentViolationRecord[];
@@ -141,7 +141,7 @@ export type PublicCandidateAttemptRecord = {
   currentSectionSlug?: string;
   currentQuestionId?: string;
   answers: Record<string, string>;
-  questionStatuses: Record<string, "skipped" | "unanswered">;
+  questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
   sectionDeadlines: Record<string, string>;
   questionDeadlines: Record<string, string>;
   violations: Array<Omit<AssessmentViolationRecord, "occurredAt"> & { occurredAt: string }>;
@@ -771,7 +771,7 @@ export async function saveCandidateAttemptProgress({
   candidateId: string;
   assessmentId: string;
   answers: Record<string, string>;
-  questionStatuses: Record<string, "skipped" | "unanswered">;
+  questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
   currentSectionSlug?: string;
   currentQuestionId?: string;
   violations?: Array<Omit<AssessmentViolationRecord, "occurredAt"> & { occurredAt: string }>;

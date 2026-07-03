@@ -94,7 +94,7 @@ export type CandidateAttempt = {
   currentSectionSlug?: string;
   currentQuestionId?: string;
   answers: AssessmentAnswers;
-  questionStatuses: Record<string, "skipped" | "unanswered">;
+  questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
   sectionDeadlines: Record<string, string>;
   questionDeadlines: Record<string, string>;
   violations: AssessmentViolation[];
@@ -472,7 +472,7 @@ export async function saveAssessmentAttemptProgress({
   candidateId: string;
   assessmentId: string;
   answers: AssessmentAnswers;
-  questionStatuses: Record<string, "skipped" | "unanswered">;
+  questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
   currentSectionSlug?: string;
   currentQuestionId?: string;
   questionDurations?: Record<string, number>;
@@ -756,6 +756,16 @@ function clearCandidateAssessmentRuntime(sections: AssessmentSection[]) {
   });
 }
 
+function clearCandidateBrowserData() {
+  window.localStorage.removeItem(JOBS_STORAGE_KEY);
+  window.localStorage.removeItem(CANDIDATES_STORAGE_KEY);
+  window.localStorage.removeItem(RESULTS_STORAGE_KEY);
+  window.localStorage.removeItem(ATTEMPTS_STORAGE_KEY);
+  window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+  window.localStorage.removeItem("kgm-hiring-authenticated");
+  window.localStorage.removeItem("kgm-hiring-active-candidate-id");
+}
+
 export async function saveAssessmentResult({
   answers,
   status,
@@ -856,12 +866,10 @@ export async function saveAssessmentResult({
       ),
     );
 
-    window.localStorage.removeItem("kgm-hiring-authenticated");
-    window.localStorage.removeItem("kgm-hiring-active-candidate-id");
   }
   clearAssessmentViolations();
   clearCandidateAssessmentRuntime(sections);
-  window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+  clearCandidateBrowserData();
   window.dispatchEvent(new Event("kgm-hiring-assessment-answers-change"));
   return savedResult;
 }
