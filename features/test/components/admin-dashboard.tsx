@@ -8,6 +8,7 @@ import {
   Clock3,
   FileCheck2,
   Mail,
+  Search,
   ShieldAlert,
   Target,
   TimerReset,
@@ -59,6 +60,7 @@ type DashboardInvite = {
   id: string;
   name: string;
   email: string;
+  jobAssignmentId?: string;
   jobTitle: string;
   invitedAt: string;
   inviteExpiresAt: string;
@@ -373,11 +375,12 @@ function HorizontalBar({
 }
 
 function ScoreDistribution({ results }: { results: AssessmentResult[] }) {
+  const [activeBucket, setActiveBucket] = useState("80-100");
   const buckets = [
-    { label: "0-39", min: 0, max: 39 },
-    { label: "40-59", min: 40, max: 59 },
-    { label: "60-79", min: 60, max: 79 },
-    { label: "80-100", min: 80, max: 100 },
+    { label: "0-39", min: 0, max: 39, tone: "Needs review" },
+    { label: "40-59", min: 40, max: 59, tone: "Developing" },
+    { label: "60-79", min: 60, max: 79, tone: "Qualified" },
+    { label: "80-100", min: 80, max: 100, tone: "Strong" },
   ].map((bucket) => ({
     ...bucket,
     count: results.filter(
@@ -385,27 +388,125 @@ function ScoreDistribution({ results }: { results: AssessmentResult[] }) {
     ).length,
   }));
   const maxCount = Math.max(1, ...buckets.map((bucket) => bucket.count));
+  const selectedBucket = buckets.find((bucket) => bucket.label === activeBucket) ?? buckets[3];
 
   return (
-    <div className="grid h-64 grid-cols-4 items-end gap-3 rounded-md border bg-muted/20 p-4">
-      {buckets.map((bucket) => (
-        <div key={bucket.label} className="flex h-full flex-col justify-end gap-2">
-          <div className="flex min-h-0 flex-1 items-end">
-            <div
-              className="w-full rounded-t-md bg-foreground"
-              style={{
-                height: `${bucket.count ? Math.max(12, (bucket.count / maxCount) * 100) : 4}%`,
-              }}
-              title={`${bucket.count} submissions scored ${bucket.label}`}
-            />
+    <div className="space-y-3">
+      <div className="flex flex-col gap-3 rounded-md border bg-muted/15 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-medium">{selectedBucket.label}% band</p>
+          <p className="text-xs text-muted-foreground">{selectedBucket.tone}</p>
+        </div>
+        <div className="text-left sm:text-right">
+          <p className="text-2xl font-semibold">{selectedBucket.count}</p>
+          <p className="text-xs text-muted-foreground">submissions</p>
+        </div>
+      </div>
+      <div className="grid h-64 grid-cols-4 items-end gap-3 rounded-md border bg-muted/20 p-4">
+        {buckets.map((bucket) => {
+          const active = selectedBucket.label === bucket.label;
+
+          return (
+            <button
+              key={bucket.label}
+              type="button"
+              onMouseEnter={() => setActiveBucket(bucket.label)}
+              onFocus={() => setActiveBucket(bucket.label)}
+              onClick={() => setActiveBucket(bucket.label)}
+              className="group flex h-full flex-col justify-end gap-2 rounded-md outline-none"
+              aria-label={`${bucket.count} submissions scored ${bucket.label} percent`}
+            >
+              <div className="flex min-h-0 flex-1 items-end">
+                <div
+                  className={cn(
+                    "relative w-full rounded-t-md transition-all duration-300",
+                    active
+                      ? "bg-foreground shadow-lg shadow-foreground/15"
+                      : "bg-foreground/45 group-hover:bg-foreground/75",
+                  )}
+                  style={{
+                    height: `${bucket.count ? Math.max(12, (bucket.count / maxCount) * 100) : 4}%`,
+                  }}
+                >
+                  <span className="absolute -top-8 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border bg-background px-2 py-1 text-xs shadow-sm group-hover:block group-focus:block">
+                    {bucket.count} in {bucket.label}%
+                  </span>
+                </div>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium">{bucket.count}</p>
+                <p className="text-xs text-muted-foreground">{bucket.label}%</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+        {buckets.map((bucket) => (
+          <button
+            key={bucket.label}
+            type="button"
+            onClick={() => setActiveBucket(bucket.label)}
+            className={cn(
+              "rounded-md border px-3 py-2 text-left transition hover:bg-muted/40",
+              selectedBucket.label === bucket.label && "border-foreground bg-foreground text-background hover:bg-foreground",
+            )}
+          >
+            <span className="block font-medium">{bucket.label}%</span>
+            <span>{bucket.tone}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DashboardSkeletonBlock({ className = "" }: { className?: string }) {
+  return <div className={cn("animate-pulse rounded-md bg-muted", className)} />;
+}
+
+export function AdminDashboardSkeleton() {
+  return (
+    <main className="min-h-svh bg-background text-foreground">
+      <AdminNavbar />
+      <section className="mx-auto w-full max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+        <div className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
+          <div className="space-y-4">
+            <DashboardSkeletonBlock className="h-6 w-52" />
+            <DashboardSkeletonBlock className="h-10 w-full max-w-2xl" />
+            <DashboardSkeletonBlock className="h-5 w-full max-w-3xl" />
+            <div className="flex gap-2">
+              <DashboardSkeletonBlock className="h-10 w-32" />
+              <DashboardSkeletonBlock className="h-10 w-40" />
+            </div>
           </div>
-          <div className="text-center">
-            <p className="text-sm font-medium">{bucket.count}</p>
-            <p className="text-xs text-muted-foreground">{bucket.label}%</p>
+          <div className="rounded-lg border bg-card p-6">
+            <DashboardSkeletonBlock className="h-6 w-36" />
+            <DashboardSkeletonBlock className="mt-3 h-10 w-24" />
+            <DashboardSkeletonBlock className="mt-5 h-3 w-full rounded-full" />
+            <div className="mt-5 grid grid-cols-3 gap-3">
+              <DashboardSkeletonBlock className="h-16 w-full" />
+              <DashboardSkeletonBlock className="h-16 w-full" />
+              <DashboardSkeletonBlock className="h-16 w-full" />
+            </div>
           </div>
         </div>
-      ))}
-    </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="rounded-lg border bg-card p-5">
+              <DashboardSkeletonBlock className="h-4 w-28" />
+              <DashboardSkeletonBlock className="mt-4 h-8 w-20" />
+              <DashboardSkeletonBlock className="mt-5 h-4 w-full" />
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+          <DashboardSkeletonBlock className="h-80 w-full rounded-lg" />
+          <DashboardSkeletonBlock className="h-80 w-full rounded-lg" />
+        </div>
+        <DashboardSkeletonBlock className="h-96 w-full rounded-lg" />
+      </section>
+    </main>
   );
 }
 
@@ -418,10 +519,11 @@ export function AdminDashboard({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [invitePage, setInvitePage] = useState(1);
   const [assessmentPage, setAssessmentPage] = useState(1);
+  const [inviteSearch, setInviteSearch] = useState("");
   const [readNotifications, setReadNotifications] = useState<string[]>(() =>
     readNotificationIds(),
   );
-  const { candidates, jobs, results } = useAdminData(!initialHiringStats);
+  const { candidates, jobs, results } = useAdminData(true);
   const dashboardJobs = useMemo(
     () =>
       jobs.length
@@ -445,6 +547,7 @@ export function AdminDashboard({
           id: candidate.id,
           name: candidate.name,
           email: candidate.email,
+          jobAssignmentId: candidate.jobAssignmentId,
           jobTitle: candidate.jobTitle ?? candidate.jobId,
           invitedAt: candidate.invitedAt,
           inviteExpiresAt: candidate.inviteExpiresAt,
@@ -487,8 +590,27 @@ export function AdminDashboard({
     (job) => job.assessmentIds.length,
   ).length;
   const jobCoverage = publicJobCount
-    ? Math.round((jobsWithAssessments / publicJobCount) * 100)
-    : 0;
+      ? Math.round((jobsWithAssessments / publicJobCount) * 100)
+      : 0;
+  const publicJobsById = new Map(
+    initialPublicJobs.map((job) => [job.id, job]),
+  );
+  const filteredDashboardInvites = dashboardInvites.filter((invite) => {
+    const query = inviteSearch.trim().toLowerCase();
+
+    if (!query) return true;
+
+    return [
+      invite.name,
+      invite.email,
+      invite.jobTitle,
+      invite.submittedAt
+        ? "submitted"
+        : invite.isInviteExpired
+          ? "expired"
+          : "active",
+    ].some((value) => value.toLowerCase().includes(query));
+  });
   const assessmentRows = dashboardJobs.map((job) => ({
     job,
     stats: getAssessmentStats(job, candidates, results, initialHiringStats),
@@ -500,15 +622,17 @@ export function AdminDashboard({
     .filter((row) => row.stats.submissions)
     .sort((first, second) => second.stats.averageScore - first.stats.averageScore)
     .slice(0, 5);
-  const inviteTotalPages = Math.max(1, Math.ceil(dashboardInvites.length / TABLE_PAGE_SIZE));
+  const inviteTotalPages = Math.max(1, Math.ceil(filteredDashboardInvites.length / TABLE_PAGE_SIZE));
   const assessmentTotalPages = Math.max(1, Math.ceil(assessmentRows.length / TABLE_PAGE_SIZE));
-  const pagedInvites = dashboardInvites.slice(
-    (invitePage - 1) * TABLE_PAGE_SIZE,
-    invitePage * TABLE_PAGE_SIZE,
+  const currentInvitePage = Math.min(invitePage, inviteTotalPages);
+  const currentAssessmentPage = Math.min(assessmentPage, assessmentTotalPages);
+  const pagedInvites = filteredDashboardInvites.slice(
+    (currentInvitePage - 1) * TABLE_PAGE_SIZE,
+    currentInvitePage * TABLE_PAGE_SIZE,
   );
   const pagedAssessments = assessmentRows.slice(
-    (assessmentPage - 1) * TABLE_PAGE_SIZE,
-    assessmentPage * TABLE_PAGE_SIZE,
+    (currentAssessmentPage - 1) * TABLE_PAGE_SIZE,
+    currentAssessmentPage * TABLE_PAGE_SIZE,
   );
 
   function markNotificationRead(id: string) {
@@ -829,15 +953,40 @@ export function AdminDashboard({
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <Card className="overflow-hidden">
+          <Card className="flex min-h-[560px] flex-col overflow-hidden">
             <CardHeader>
-              <CardTitle>Candidate invitation tracker</CardTitle>
-              <CardDescription>
-                Recent job assessment invitations with clear expiry and submission state.
-              </CardDescription>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>Candidate invitation tracker</CardTitle>
+                  <CardDescription>
+                    Recent job assessment invitations with clear expiry and submission state.
+                  </CardDescription>
+                </div>
+                <Button asChild className="w-full sm:w-auto">
+                  <Link href="/admin/jobs">
+                    Invite candidate
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
+            <CardContent className="flex flex-1 flex-col p-0">
+              <div className="border-t px-4 py-3">
+                <div className="relative max-w-md">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={inviteSearch}
+                    onChange={(event) => {
+                      setInviteSearch(event.target.value);
+                      setInvitePage(1);
+                    }}
+                    className="h-10 w-full rounded-md border bg-background px-3 pl-9 text-sm shadow-xs outline-none transition focus-visible:border-input focus-visible:ring-0"
+                    placeholder="Search candidate, email, job, or status"
+                    aria-label="Search candidate invitations"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 overflow-x-auto">
                 <table className="w-full min-w-[860px] text-sm">
                   <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <tr>
@@ -846,11 +995,15 @@ export function AdminDashboard({
                       <th className="px-4 py-3 font-medium">Invited</th>
                       <th className="px-4 py-3 font-medium">Expiry</th>
                       <th className="px-4 py-3 font-medium">Status</th>
+                      <th className="px-4 py-3 text-right font-medium">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {pagedInvites.map((invite) => {
                       const daysUntilExpiry = getDaysUntil(invite.inviteExpiresAt);
+                      const linkedJob = invite.jobAssignmentId
+                        ? publicJobsById.get(invite.jobAssignmentId)
+                        : undefined;
                       return (
                         <tr key={invite.id} className="bg-background">
                           <td className="px-4 py-3">
@@ -888,24 +1041,44 @@ export function AdminDashboard({
                                   : "Active"}
                             </Badge>
                           </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button
+                              asChild={Boolean(linkedJob)}
+                              size="sm"
+                              variant="outline"
+                              disabled={!linkedJob}
+                            >
+                              {linkedJob ? (
+                                <Link href={`/admin/jobs/${linkedJob.slug}`}>
+                                  Invite candidate
+                                </Link>
+                              ) : (
+                                <span>Invite candidate</span>
+                              )}
+                            </Button>
+                          </td>
                         </tr>
                       );
                     })}
                     {!pagedInvites.length ? (
                       <tr>
-                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                          Candidate assessment invites will appear here.
+                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                          {dashboardInvites.length
+                            ? "No invitations match your search."
+                            : "Candidate assessment invites will appear here."}
                         </td>
                       </tr>
                     ) : null}
                   </tbody>
                 </table>
               </div>
-              <PaginatedControls
-                page={invitePage}
-                totalPages={inviteTotalPages}
-                onPageChange={setInvitePage}
-              />
+              <div className="mt-auto">
+                <PaginatedControls
+                  page={currentInvitePage}
+                  totalPages={inviteTotalPages}
+                  onPageChange={setInvitePage}
+                />
+              </div>
             </CardContent>
           </Card>
 
@@ -964,15 +1137,15 @@ export function AdminDashboard({
           </Card>
         </div>
 
-        <Card className="overflow-hidden">
+        <Card className="flex min-h-[560px] flex-col overflow-hidden">
           <CardHeader>
             <CardTitle>Assessment performance table</CardTitle>
             <CardDescription>
               Paginated assessment analytics with invitation volume, completion, score, and test structure.
             </CardDescription>
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
+          <CardContent className="flex flex-1 flex-col p-0">
+            <div className="flex-1 overflow-x-auto">
               <table className="w-full min-w-[980px] text-sm">
                 <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
@@ -1035,11 +1208,13 @@ export function AdminDashboard({
                 </tbody>
               </table>
             </div>
-            <PaginatedControls
-              page={assessmentPage}
-              totalPages={assessmentTotalPages}
-              onPageChange={setAssessmentPage}
-            />
+            <div className="mt-auto">
+              <PaginatedControls
+                page={currentAssessmentPage}
+                totalPages={assessmentTotalPages}
+                onPageChange={setAssessmentPage}
+              />
+            </div>
           </CardContent>
         </Card>
 

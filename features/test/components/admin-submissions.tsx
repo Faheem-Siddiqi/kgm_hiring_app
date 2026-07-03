@@ -1,17 +1,19 @@
 "use client";
-
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
   Clock,
   Mail,
+  Files,
   Search,
   Send,
+  Menu,
   ShieldAlert,
 } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
+
 import { AdminNavbar } from "@/components/admin/admin-navbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -157,7 +159,7 @@ export function AdminSubmissions() {
         <div className="flex min-w-0 flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <Badge variant="secondary" className="mb-3 w-fit gap-2">
-              <Send className="size-3.5" />
+              <Files className="size-3.5" />
               Submissions
             </Badge>
             <h1 className="text-3xl font-semibold tracking-tight">

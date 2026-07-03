@@ -1,4 +1,3 @@
-import Link from "next/link";
 import {
   ArrowLeft,
   BriefcaseBusiness,
@@ -8,6 +7,9 @@ import {
   MapPin,
   WalletCards,
 } from "lucide-react";
+import Link from "next/link";
+
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +20,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { PublicJob } from "@/lib/job-types";
+
+
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -133,7 +137,7 @@ export function JobDetail({ job }: { job: PublicJob }) {
                   <p className="text-sm font-medium">{job.title}</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     {primaryAssessment
-                      ? `You will continue to ${primaryAssessment.code} · ${primaryAssessment.name}.`
+                      ? `You will continue to ${primaryAssessment.code} · ${job.title}.`
                       : "No assessment is assigned to this job yet."}
                   </p>
                 </div>

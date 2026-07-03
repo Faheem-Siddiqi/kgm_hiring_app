@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   ArrowRight,
@@ -13,6 +12,8 @@ import {
   SlidersHorizontal,
   UserCheck,
 } from "lucide-react";
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { Pagination, PublicJob } from "@/lib/job-types";
+
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -214,7 +216,6 @@ export function JobListing({
                       </div>
                     </div>
                     <span className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition group-hover:bg-accent">
-                      View job
                       <ArrowRight className="size-4" />
                     </span>
                   </div>

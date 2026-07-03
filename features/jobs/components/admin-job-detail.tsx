@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, CheckCircle2, ClipboardList, Copy, Loader2, Save, Search, Send, Users, type LucideIcon } from "lucide-react";
+import { ArrowLeft, BarChart3, CheckCircle2, ClipboardList, Clock3, Copy, Loader2, Save, Search, Send, ShieldAlert, Target, TimerReset, Users, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -25,6 +25,7 @@ import {
 import {
   JOB_EXPERIENCE_LEVELS,
   JOB_LOCATIONS,
+  JOB_STATUSES,
   type JobAssessmentOption,
   type PublicJob,
 } from "@/lib/job-types";
@@ -59,6 +60,7 @@ function parseAdminSnapshot(snapshot: string) {
 
 function useAdminData() {
   const [data, setData] = useState<AdminSnapshot>({});
+  const [isLoading, setIsLoading] = useState(true);
   const localSnapshot = useSyncExternalStore(
     subscribeToAdminData,
     readAdminDataSnapshot,
@@ -67,6 +69,7 @@ function useAdminData() {
   const loadData = useCallback(async () => {
     const snapshot = await fetchAdminDataSnapshot();
     setData({ candidates: snapshot.candidates, results: snapshot.results });
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -77,8 +80,10 @@ function useAdminData() {
         const snapshot = await fetchAdminDataSnapshot();
         if (active) {
           setData({ candidates: snapshot.candidates, results: snapshot.results });
+          setIsLoading(false);
         }
       } catch (error) {
+        if (active) setIsLoading(false);
         toast.error(error instanceof Error ? error.message : "Could not load candidates.");
       }
     }
@@ -99,7 +104,7 @@ function useAdminData() {
   const results = data.results?.length ? data.results : localData.results ?? [];
   const canViewCandidateOtp = data.canViewCandidateOtp ?? localData.canViewCandidateOtp ?? false;
 
-  return { candidates, results, canViewCandidateOtp, refresh: loadData };
+  return { candidates, results, canViewCandidateOtp, isLoading, refresh: loadData };
 }
 
 function formatDate(value: string) {
@@ -137,9 +142,11 @@ type StatItem = {
 export function AdminJobDetail({
   job,
   assessments,
+  mode = "overview",
 }: {
   job: PublicJob;
   assessments: JobAssessmentOption[];
+  mode?: "overview" | "configure";
 }) {
   const [title, setTitle] = useState(job.title);
   const [department, setDepartment] = useState(job.department);
@@ -163,8 +170,10 @@ export function AdminJobDetail({
   const [sendingInvite, setSendingInvite] = useState(false);
   const [resendingExistingInvite, setResendingExistingInvite] = useState(false);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [reopeningJob, setReopeningJob] = useState(false);
-  const { candidates, results, canViewCandidateOtp, refresh } = useAdminData();
+  const [activeScoreBucket, setActiveScoreBucket] = useState("80-100");
+  const { candidates, results, canViewCandidateOtp, isLoading, refresh } = useAdminData();
   const jobCandidates = useMemo(
     () =>
       candidates.filter((candidate) =>
@@ -186,6 +195,45 @@ export function AdminJobDetail({
   const completionRate = expectedSubmissions
     ? Math.round((jobResults.length / expectedSubmissions) * 100)
     : 0;
+  const activeInvites = jobCandidates.filter(
+    (candidate) => !candidate.submittedAt && !candidate.isInviteExpired,
+  ).length;
+  const expiredInvites = jobCandidates.filter(
+    (candidate) => !candidate.submittedAt && candidate.isInviteExpired,
+  ).length;
+  const pendingSubmissions = Math.max(0, expectedSubmissions - jobResults.length);
+  const averageScore = jobResults.length
+    ? Math.round(jobResults.reduce((total, result) => total + result.score, 0) / jobResults.length)
+    : 0;
+  const pendingReview = jobResults.filter((result) => !result.decision && !result.evaluatedAt).length;
+  const autoSubmitted = jobResults.filter((result) => result.status === "Auto submitted").length;
+  const violationCount = jobResults.reduce((total, result) => total + result.violations.length, 0);
+  const evaluatedCount = jobResults.filter((result) => result.evaluatedAt || result.decision).length;
+  const scoreBuckets = [
+    {
+      label: "0-39",
+      tone: "Needs review",
+      count: jobResults.filter((result) => result.score < 40).length,
+    },
+    {
+      label: "40-59",
+      tone: "Developing",
+      count: jobResults.filter((result) => result.score >= 40 && result.score < 60).length,
+    },
+    {
+      label: "60-79",
+      tone: "Qualified",
+      count: jobResults.filter((result) => result.score >= 60 && result.score < 80).length,
+    },
+    {
+      label: "80-100",
+      tone: "Strong",
+      count: jobResults.filter((result) => result.score >= 80).length,
+    },
+  ];
+  const maxScoreBucket = Math.max(1, ...scoreBuckets.map((bucket) => bucket.count));
+  const selectedScoreBucket =
+    scoreBuckets.find((bucket) => bucket.label === activeScoreBucket) ?? scoreBuckets[3];
   const filteredJobCandidates = useMemo(() => {
     const query = candidateSearch.trim().toLowerCase();
 
@@ -445,6 +493,34 @@ export function AdminJobDetail({
     }
   }
 
+  async function changeJobStatus(status: typeof currentStatus) {
+    if (status === currentStatus || updatingStatus) return;
+
+    const previousStatus = currentStatus;
+    setCurrentStatus(status);
+    setUpdatingStatus(true);
+
+    try {
+      const response = await fetch("/api/admin/jobs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.id, status }),
+      });
+      const payload = (await response.json()) as { message?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.message ?? "Could not update job status.");
+      }
+
+      toast.success(`Job status changed to ${status}.`);
+    } catch (error) {
+      setCurrentStatus(previousStatus);
+      toast.error(error instanceof Error ? error.message : "Could not update job status.");
+    } finally {
+      setUpdatingStatus(false);
+    }
+  }
+
   return (
     <main className="min-h-svh bg-background text-foreground">
       <AdminNavbar />
@@ -529,21 +605,56 @@ export function AdminJobDetail({
         </DialogContent>
       </Dialog>
       <section className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-3">
-            <Button asChild variant="outline" size="icon">
-              <Link href="/admin/jobs" aria-label="Back to jobs">
-                <ArrowLeft className="size-4" />
-              </Link>
-            </Button>
+        <div className="rounded-lg border bg-card p-4 shadow-xs">
+        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            
             <div className="min-w-0">
-              <p className="truncate text-sm text-muted-foreground">{job.department}</p>
-              <h1 className="truncate text-xl font-semibold tracking-tight">{job.title}</h1>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="capitalize">{currentStatus}</Badge>
+                <span className="text-xs text-muted-foreground">{job.department} / {job.location}</span>
+              </div>
+              <h1 className="truncate text-2xl font-semibold tracking-tight">{job.title}</h1>
+              <p className="mt-1 line-clamp-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                {description}
+              </p>
             </div>
           </div>
-          <Button asChild variant="outline">
-            <Link href={`/jobs/${job.slug}`}>Public job</Link>
-          </Button>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-2 rounded-md border bg-background px-2 py-1">
+              <Label htmlFor="quick-job-status" className="text-sm  text-muted-foreground">
+                Status |
+              </Label>
+              <select
+                id="quick-job-status"
+                className="h-7 bg-transparent text-sm capitalize outline-none disabled:opacity-60"
+                value={currentStatus}
+                disabled={updatingStatus}
+                onChange={(event) => void changeJobStatus(event.target.value as typeof currentStatus)}
+              >
+                {JOB_STATUSES.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+              {updatingStatus ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+            </div>
+            {mode === "configure" ? (
+              <Button asChild variant="outline">
+                <Link href={`/admin/jobs/${job.slug}`}>Back to analytics</Link>
+              </Button>
+            ) : (
+              <Button asChild>
+                <Link href={`/admin/jobs/${job.slug}/configure`}>
+                  {/* <Save className="size-4" /> */}
+                  Configure job
+                </Link>
+              </Button>
+            )}
+           
+          </div>
+        </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -559,9 +670,10 @@ export function AdminJobDetail({
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_0.9fr]">
+          {mode === "configure" ? (
           <Card>
             <CardHeader>
-              <CardTitle>Edit job</CardTitle>
+              <CardTitle>Configure job</CardTitle>
               <CardDescription>Update the public job detail and assigned assessments.</CardDescription>
             </CardHeader>
             <CardContent>
@@ -589,6 +701,24 @@ export function AdminJobDetail({
                       {JOB_EXPERIENCE_LEVELS.map((item) => <option key={item} value={item}>{item}</option>)}
                     </select>
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="job-status">Status</Label>
+                  <select
+                    id="job-status"
+                    className="h-10 w-full rounded-md border bg-background px-3 text-sm capitalize shadow-xs outline-none"
+                    value={currentStatus}
+                    onChange={(event) => setCurrentStatus(event.target.value as typeof currentStatus)}
+                  >
+                    {JOB_STATUSES.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Paused and closed jobs block new candidate invitations until reopened.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="job-description">Description</Label>
@@ -631,8 +761,156 @@ export function AdminJobDetail({
               </form>
             </CardContent>
           </Card>
+          ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Job analytics</CardTitle>
+              <CardDescription>
+                Useful signals for this job invitation, assessment, and review flow.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {isLoading ? (
+                <div className="space-y-5">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <div key={index} className="rounded-md border p-4">
+                        <div className="mb-3 size-4 animate-pulse rounded bg-muted" />
+                        <div className="h-3 w-28 animate-pulse rounded bg-muted" />
+                        <div className="mt-3 h-7 w-16 animate-pulse rounded bg-muted" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="h-52 animate-pulse rounded-md border bg-muted/40" />
+                </div>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      { label: "Expected submissions", value: expectedSubmissions, icon: Target },
+                      { label: "Pending submissions", value: pendingSubmissions, icon: Clock3 },
+                      { label: "Average score", value: `${averageScore}%`, icon: BarChart3 },
+                      { label: "Pending review", value: pendingReview, icon: ClipboardList },
+                    ].map(({ label, value, icon: Icon }) => (
+                      <div key={label} className="rounded-md border p-4 transition hover:bg-muted/30">
+                        <Icon className="mb-3 size-4 text-muted-foreground" />
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className="mt-1 text-2xl font-semibold">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">Completion progress</span>
+                      <span className="text-muted-foreground">{jobResults.length}/{expectedSubmissions || 0}</span>
+                    </div>
+                    <div className="h-3 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${completionRate}%` }} />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="font-semibold">{activeInvites}</p>
+                      <p className="text-xs text-muted-foreground">Active invites</p>
+                    </div>
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="font-semibold">{expiredInvites}</p>
+                      <p className="text-xs text-muted-foreground">Expired invites</p>
+                    </div>
+                    <div className="rounded-md border bg-muted/20 p-3">
+                      <p className="font-semibold">{evaluatedCount}</p>
+                      <p className="text-xs text-muted-foreground">Evaluated</p>
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-4">
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-medium">Interactive score distribution</p>
+                        <p className="text-xs text-muted-foreground">
+                          Hover or click a score band to inspect candidate quality.
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-muted/20 px-3 py-2 text-right">
+                        <p className="text-xs text-muted-foreground">{selectedScoreBucket.label}% band</p>
+                        <p className="text-lg font-semibold">{selectedScoreBucket.count} candidates</p>
+                        <p className="text-xs text-muted-foreground">{selectedScoreBucket.tone}</p>
+                      </div>
+                    </div>
+                    <div className="grid h-48 grid-cols-4 items-end gap-3 rounded-md bg-muted/20 p-3">
+                      {scoreBuckets.map((bucket) => {
+                        const active = selectedScoreBucket.label === bucket.label;
+                        return (
+                          <button
+                            key={bucket.label}
+                            type="button"
+                            onMouseEnter={() => setActiveScoreBucket(bucket.label)}
+                            onFocus={() => setActiveScoreBucket(bucket.label)}
+                            onClick={() => setActiveScoreBucket(bucket.label)}
+                            className="group flex h-full flex-col justify-end gap-2 rounded-md outline-none"
+                            aria-label={`${bucket.count} candidates scored ${bucket.label} percent`}
+                          >
+                            <div className="flex min-h-0 flex-1 items-end">
+                              <div
+                                className={`relative w-full rounded-t-md transition-all duration-300 ${
+                                  active
+                                    ? "bg-foreground shadow-lg shadow-foreground/15"
+                                    : "bg-foreground/45 group-hover:bg-foreground/75"
+                                }`}
+                                style={{
+                                  height: `${bucket.count ? Math.max(14, (bucket.count / maxScoreBucket) * 100) : 5}%`,
+                                }}
+                              >
+                                <span className="absolute -top-8 left-1/2 hidden -translate-x-1/2 rounded-md border bg-background px-2 py-1 text-xs shadow-sm group-hover:block group-focus:block">
+                                  {bucket.count} in {bucket.label}%
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-sm font-medium">{bucket.count}</p>
+                              <p className="text-xs text-muted-foreground">{bucket.label}%</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                      {scoreBuckets.map((bucket) => (
+                        <button
+                          key={bucket.label}
+                          type="button"
+                          onClick={() => setActiveScoreBucket(bucket.label)}
+                          className={`rounded-md border px-3 py-2 text-left transition ${
+                            selectedScoreBucket.label === bucket.label
+                              ? "border-foreground bg-foreground text-background"
+                              : "hover:bg-muted/40"
+                          }`}
+                        >
+                          <span className="block font-medium">{bucket.label}%</span>
+                          <span>{bucket.tone}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-md border p-4">
+                      <ShieldAlert className="mb-3 size-4 text-muted-foreground" />
+                      <p className="text-xs text-muted-foreground">Integrity violations</p>
+                      <p className="mt-1 text-2xl font-semibold">{violationCount}</p>
+                    </div>
+                    <div className="rounded-md border p-4">
+                      <TimerReset className="mb-3 size-4 text-muted-foreground" />
+                      <p className="text-xs text-muted-foreground">Auto-submitted</p>
+                      <p className="mt-1 text-2xl font-semibold">{autoSubmitted}</p>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+          )}
 
           <div className="space-y-6">
+            {mode === "overview" ? (
             <Card>
               <CardHeader>
                 <CardTitle>Invite candidate</CardTitle>
@@ -676,6 +954,7 @@ export function AdminJobDetail({
                 </form>
               </CardContent>
             </Card>
+            ) : null}
 
             <Card>
               <CardHeader>
@@ -697,12 +976,13 @@ export function AdminJobDetail({
           </div>
         </div>
 
-        <Card>
+        {mode === "overview" ? (
+        <Card className="flex min-h-[560px] flex-col">
           <CardHeader>
             <CardTitle>Candidates for this job</CardTitle>
             <CardDescription>Open candidate assessment detail when a submission exists.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="flex flex-1 flex-col space-y-4">
             <div className="relative max-w-md">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -717,7 +997,7 @@ export function AdminJobDetail({
               />
             </div>
 
-            <div className="overflow-hidden rounded-md border">
+            <div className="flex-1 overflow-hidden rounded-md border">
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[900px] text-sm">
                   <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -732,7 +1012,20 @@ export function AdminJobDetail({
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {paginatedCandidates.map((candidate) => {
+                    {isLoading
+                      ? Array.from({ length: 5 }).map((_, index) => (
+                          <tr key={`candidate-skeleton-${index}`} className="bg-background">
+                            {Array.from({ length: 7 }).map((__, cellIndex) => (
+                              <td key={cellIndex} className="px-4 py-4">
+                                <div className="h-4 w-full max-w-36 animate-pulse rounded bg-muted" />
+                                {cellIndex === 0 ? (
+                                  <div className="mt-2 h-3 w-24 animate-pulse rounded bg-muted" />
+                                ) : null}
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      : paginatedCandidates.map((candidate) => {
                       const candidateAssessmentIds = candidate.assessmentIds?.length
                         ? candidate.assessmentIds.filter((id) => job.assessmentIds.includes(id))
                         : [candidate.jobId];
@@ -868,9 +1161,9 @@ export function AdminJobDetail({
                         </tr>
                       );
                     })}
-                    {!paginatedCandidates.length ? (
+                    {!isLoading && !paginatedCandidates.length ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted-foreground">
                           {jobCandidates.length
                             ? "No candidates match your search."
                             : "Invited candidates for this job will appear here."}
@@ -882,8 +1175,7 @@ export function AdminJobDetail({
               </div>
             </div>
 
-            {filteredJobCandidates.length > CANDIDATES_PER_PAGE ? (
-              <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="mt-auto flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-muted-foreground">
                   Page {currentCandidatePage} of {totalCandidatePages} - {filteredJobCandidates.length} candidates
                 </p>
@@ -908,7 +1200,6 @@ export function AdminJobDetail({
                   </Button>
                 </div>
               </div>
-            ) : null}
             <div className="hidden">
             {jobCandidates.map((candidate) => {
               const result = jobResults.find((item) =>
@@ -975,6 +1266,7 @@ export function AdminJobDetail({
             </div>
           </CardContent>
         </Card>
+        ) : null}
       </section>
     </main>
   );
