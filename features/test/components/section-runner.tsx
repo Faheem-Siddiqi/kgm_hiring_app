@@ -19,6 +19,7 @@ import {
   Lock,
   Send,
   ShieldAlert,
+  SkipForward,
   TriangleAlert,
   Volume2,
 } from "lucide-react";
@@ -112,6 +113,11 @@ function readStoredDeadline(key: string) {
 function writeStoredDeadline(key: string, value: number) {
   window.localStorage.setItem(key, String(value));
   window.sessionStorage.setItem(key, String(value));
+}
+
+function clearStoredDeadline(key: string) {
+  window.localStorage.removeItem(key);
+  window.sessionStorage.removeItem(key);
 }
 
 function readStoredNumber(key: string) {
@@ -553,13 +559,20 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
       ? new Date(activeAttempt.questionDeadlines[currentQuestion.id]).getTime() + serverTimeOffsetMs
       : null;
     const storedEndAt = serverEndAt ?? readStoredDeadline(questionTimerStorageKey);
-    const endAt = storedEndAt ?? Date.now() + questionDurationSeconds * 1000;
+    const pausedSeconds =
+      questionStatuses[currentQuestion.id] === "skipped"
+        ? readStoredNumber(questionRemainingStorageKey)
+        : null;
+    const endAt =
+      storedEndAt ??
+      Date.now() + (pausedSeconds ?? questionDurationSeconds) * 1000;
     questionTimerEndAtRef.current = endAt;
 
     if (!storedEndAt) {
       writeStoredDeadline(questionTimerStorageKey, endAt);
-      window.sessionStorage.removeItem(questionRemainingStorageKey);
-      window.localStorage.removeItem(questionRemainingStorageKey);
+      if (pausedSeconds === null) {
+        clearStoredDeadline(questionRemainingStorageKey);
+      }
     }
 
     function updateQuestionTimer() {
@@ -575,7 +588,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     const intervalId = window.setInterval(updateQuestionTimer, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [activeAttempt, currentQuestion.id, questionDurationSeconds, questionRemainingStorageKey, questionTimerStorageKey]);
+  }, [activeAttempt, currentQuestion.id, questionDurationSeconds, questionRemainingStorageKey, questionStatuses, questionTimerStorageKey]);
 
   function writeQuestionStatus(questionId: string, status: QuestionStatus) {
     const next = { ...questionStatuses, [questionId]: status };
@@ -598,6 +611,16 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   }
 
   function skipCurrentQuestion() {
+    window.localStorage.setItem(
+      questionRemainingStorageKey,
+      String(Math.max(0, questionTimeLeftSeconds)),
+    );
+    window.sessionStorage.setItem(
+      questionRemainingStorageKey,
+      String(Math.max(0, questionTimeLeftSeconds)),
+    );
+    clearStoredDeadline(questionTimerStorageKey);
+    questionTimerEndAtRef.current = null;
     writeQuestionStatus(currentQuestion.id, "skipped");
     if (!isLastQuestion) {
       setCurrentIndex((index) => index + 1);
@@ -747,7 +770,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     isStoppingAssessmentRef.current = true;
     setShowWindowWarning(false);
     await exitAssessmentFullscreen();
-    router.replace("/jobs");
+    await submitAssessment("Submitted");
   }
 
   function leaveTimedOutSection() {
@@ -955,16 +978,17 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                     `kgm-hiring-assessment-question-timer-${section.slug}-${question.id}`,
                     durationSeconds,
                   );
+                  const isSkipped = status === "skipped" && !isAnswered;
                   const isExpired = status === "unanswered" || questionTimeLeft <= 0;
                   const isCurrent = index === currentIndex;
                   const statusLabel = isCurrent
                     ? "Current"
                     : isAnswered
                       ? "Attempted"
+                      : isSkipped
+                        ? "Skipped"
                       : isExpired
                         ? "Time expired"
-                        : status === "skipped"
-                          ? "Skipped / pending"
                           : "Pending";
                   return (
                     <Button
@@ -982,29 +1006,40 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                       variant="outline"
                     >
                       <span>Question {index + 1}</span>
-                      <span
-                        aria-label={statusLabel}
-                        className={[
-                          "inline-flex size-6 items-center justify-center rounded-full border",
-                          isCurrent
-                            ? "border-primary/30 bg-primary/15 text-primary"
-                            : isAnswered
-                            ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-600"
-                            : isExpired
-                              ? "border-destructive/30 bg-destructive/10 text-destructive"
-                            : "border-amber-500/30 bg-amber-500/15 text-amber-600",
-                        ].join(" ")}
-                        title={statusLabel}
-                      >
-                        {isCurrent ? (
-                          <CircleDot className="size-4" aria-hidden="true" />
-                        ) : isAnswered ? (
-                          <CheckCircle2 className="size-4" aria-hidden="true" />
-                        ) : isExpired ? (
-                          <Lock className="size-4" aria-hidden="true" />
-                        ) : (
-                          <TriangleAlert className="size-4" aria-hidden="true" />
-                        )}
+                      <span className="inline-flex items-center gap-2">
+                        {isSkipped ? (
+                          <span className="text-xs font-medium text-sky-600">
+                            Skipped
+                          </span>
+                        ) : null}
+                        <span
+                          aria-label={statusLabel}
+                          className={[
+                            "inline-flex size-6 items-center justify-center rounded-full border",
+                            isCurrent
+                              ? "border-primary/30 bg-primary/15 text-primary"
+                              : isAnswered
+                              ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-600"
+                              : isSkipped
+                                ? "border-sky-500/30 bg-sky-500/15 text-sky-600"
+                              : isExpired
+                                ? "border-destructive/30 bg-destructive/10 text-destructive"
+                              : "border-amber-500/30 bg-amber-500/15 text-amber-600",
+                          ].join(" ")}
+                          title={statusLabel}
+                        >
+                          {isCurrent ? (
+                            <CircleDot className="size-4" aria-hidden="true" />
+                          ) : isAnswered ? (
+                            <CheckCircle2 className="size-4" aria-hidden="true" />
+                          ) : isSkipped ? (
+                            <SkipForward className="size-4" aria-hidden="true" />
+                          ) : isExpired ? (
+                            <Lock className="size-4" aria-hidden="true" />
+                          ) : (
+                            <TriangleAlert className="size-4" aria-hidden="true" />
+                          )}
+                        </span>
                       </span>
                     </Button>
                   );

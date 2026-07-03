@@ -1,6 +1,9 @@
 "use client";
 
-import { assessmentSections } from "@/features/test/assessment-data";
+import {
+  assessmentSections,
+  type AssessmentSection,
+} from "@/features/test/assessment-data";
 import {
   assessmentResourceSummaries,
   buildAssessmentSectionsFromResource,
@@ -730,6 +733,29 @@ export function clearAssessmentViolations() {
   writeAssessmentViolations([]);
 }
 
+function clearCandidateAssessmentRuntime(sections: AssessmentSection[]) {
+  window.localStorage.removeItem("kgm-hiring-assessment-answers");
+  window.localStorage.removeItem(QUESTION_STATUS_STORAGE_KEY);
+  window.localStorage.removeItem("kgm-hiring-assessment-current-section");
+  window.localStorage.removeItem("kgm-hiring-assessment-current-question");
+  window.sessionStorage.removeItem("kgm-hiring-assessment-current-section");
+  window.sessionStorage.removeItem("kgm-hiring-assessment-current-question");
+
+  sections.forEach((section) => {
+    const sectionTimerKey = `kgm-hiring-assessment-timer-${section.slug}`;
+    window.localStorage.removeItem(sectionTimerKey);
+    window.sessionStorage.removeItem(sectionTimerKey);
+
+    section.questions.forEach((question) => {
+      const questionTimerKey = `kgm-hiring-assessment-question-timer-${section.slug}-${question.id}`;
+      window.localStorage.removeItem(questionTimerKey);
+      window.sessionStorage.removeItem(questionTimerKey);
+      window.localStorage.removeItem(`${questionTimerKey}-remaining`);
+      window.sessionStorage.removeItem(`${questionTimerKey}-remaining`);
+    });
+  });
+}
+
 export async function saveAssessmentResult({
   answers,
   status,
@@ -834,8 +860,7 @@ export async function saveAssessmentResult({
     window.localStorage.removeItem("kgm-hiring-active-candidate-id");
   }
   clearAssessmentViolations();
-  window.localStorage.removeItem("kgm-hiring-assessment-answers");
-  window.localStorage.removeItem(QUESTION_STATUS_STORAGE_KEY);
+  clearCandidateAssessmentRuntime(sections);
   window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
   window.dispatchEvent(new Event("kgm-hiring-assessment-answers-change"));
   return savedResult;
