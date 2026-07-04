@@ -422,8 +422,7 @@ export function TestOverview() {
 
               <p className="mt-2  text-sm leading-6 text-muted-foreground">
                 Review the instructions, check each section, and start when you
-                are ready. Your saved progress and timers continue from the
-                existing attempt.
+                are ready. Your saved answers resume from the existing attempt.
               </p>
             </div>
 
@@ -448,10 +447,13 @@ export function TestOverview() {
 
                 <CardTitle>Important instructions</CardTitle>
                 <CardDescription className=" leading-6">
-                  Keep the test window open and in fullscreen. You may switch
-                  sections, but timers do not restart after refresh, disconnect,
-                  tab close, or reopening the link. Submitted sections cannot be
-                  edited after time expires or after final submission.
+                  Keep the test window open and in fullscreen. Active question
+                  and section timers continue during refresh, disconnect, tab
+                  close, or power loss, so a 5 minute outage consumes 5 minutes
+                  from the active timers. If you skip a question, that question
+                  timer pauses and resumes from the saved remaining time when
+                  you reopen it. Submitted or timed-out questions cannot be
+                  edited.
                 </CardDescription>
               </div>
             </CardHeader>
@@ -555,8 +557,9 @@ className=' lg:my-5 mb-5'
                               </CardTitle>
 
                               <CardDescription className="mt-1 max-w-2xl text-sm leading-6">
-                                Open any available section. Progress and timers
-                                are saved automatically.
+                                Open any available section. Progress, answers,
+                                and paused skipped-question timers are saved
+                                automatically.
                               </CardDescription>
                             </div>
 
@@ -797,4 +800,4 @@ className=' lg:my-5 mb-5'
       </Dialog>
     </>
   );
-} 
+}

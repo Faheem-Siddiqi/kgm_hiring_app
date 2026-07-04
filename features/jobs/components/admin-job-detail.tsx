@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, BarChart3, CheckCircle2, ClipboardList, Clock3, Copy, Loader2, Save, Search, Send, ShieldAlert, Target, TimerReset, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, CheckCircle2, ClipboardList, Clock3, Copy, Loader2, Save, Search, Send, ShieldAlert, Target, TimerReset, Trophy, Users, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -176,6 +176,34 @@ function JobScoreDistributionSkeleton() {
   );
 }
 
+function TopCandidatesSkeleton() {
+  return (
+    <div className="rounded-md border p-4">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="space-y-2">
+          <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-64 max-w-full animate-pulse rounded bg-muted" />
+        </div>
+        <div className="size-9 animate-pulse rounded-md bg-muted" />
+      </div>
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div key={index} className="rounded-md border bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="h-4 w-36 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-48 max-w-full animate-pulse rounded bg-muted" />
+              </div>
+              <div className="h-6 w-14 animate-pulse rounded-full bg-muted" />
+            </div>
+            <div className="mt-3 h-3 w-32 animate-pulse rounded bg-muted" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AdminJobDetail({
   job,
   assessments,
@@ -271,6 +299,17 @@ export function AdminJobDetail({
   const maxScoreBucket = Math.max(1, ...scoreBuckets.map((bucket) => bucket.count));
   const selectedScoreBucket =
     scoreBuckets.find((bucket) => bucket.label === activeScoreBucket) ?? scoreBuckets[3];
+  const topPerformingCandidates = useMemo(
+    () =>
+      [...jobResults]
+        .sort(
+          (first, second) =>
+            second.score - first.score ||
+            new Date(second.submittedAt).getTime() - new Date(first.submittedAt).getTime(),
+        )
+        .slice(0, 3),
+    [jobResults],
+  );
   const filteredJobCandidates = useMemo(() => {
     const query = candidateSearch.trim().toLowerCase();
 
@@ -1008,6 +1047,54 @@ export function AdminJobDetail({
                     </Link>
                   </Button>
                 ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>Top candidates</CardTitle>
+                    <CardDescription>Best three submitted scores for this job.</CardDescription>
+                  </div>
+                  <div className="rounded-md border bg-muted/20 p-2">
+                    <Trophy className="size-4 text-muted-foreground" />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <TopCandidatesSkeleton />
+                ) : topPerformingCandidates.length ? (
+                  <div className="space-y-3">
+                    {topPerformingCandidates.map((result, index) => (
+                      <Link
+                        key={result.id}
+                        href={`/admin/submissions/${result.id}`}
+                        className="block rounded-md border bg-muted/20 p-3 transition hover:bg-muted/40"
+                      >
+                        <div className="flex min-w-0 items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {index + 1}. {result.candidateName}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {result.candidateEmail}
+                            </p>
+                          </div>
+                          <Badge variant="secondary">{result.score}%</Badge>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Submitted {formatDate(result.submittedAt)}
+                        </p>
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
+                    No submitted scores yet. The best performing candidates will appear here after submissions arrive.
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

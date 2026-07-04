@@ -38,6 +38,8 @@ export const PATCH = withErrorHandler(async (request: Request) => {
     assessmentId?: string;
     answers?: Record<string, string>;
     questionStatuses?: Record<string, "answered" | "skipped" | "unanswered">;
+    questionRemainingSeconds?: Record<string, number>;
+    questionDeadlines?: Record<string, string>;
     currentSectionSlug?: string;
     currentQuestionId?: string;
     questionDurations?: Record<string, number>;
@@ -62,6 +64,8 @@ export const PATCH = withErrorHandler(async (request: Request) => {
     assessmentId: body.assessmentId,
     answers: body.answers ?? {},
     questionStatuses: body.questionStatuses ?? {},
+    questionRemainingSeconds: body.questionRemainingSeconds,
+    questionDeadlines: body.questionDeadlines,
     currentSectionSlug: body.currentSectionSlug,
     currentQuestionId: body.currentQuestionId,
     questionDurations: body.questionDurations,

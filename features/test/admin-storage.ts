@@ -95,6 +95,7 @@ export type CandidateAttempt = {
   currentQuestionId?: string;
   answers: AssessmentAnswers;
   questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
+  questionRemainingSeconds: Record<string, number>;
   sectionDeadlines: Record<string, string>;
   questionDeadlines: Record<string, string>;
   violations: AssessmentViolation[];
@@ -137,6 +138,17 @@ function readJson<T>(key: string, fallback: T) {
 function writeJson<T>(key: string, value: T) {
   window.localStorage.setItem(key, JSON.stringify(value));
   window.dispatchEvent(new Event("kgm-hiring-admin-data-change"));
+}
+
+function clearBrowserStorageByPrefix(prefix: string) {
+  [window.localStorage, window.sessionStorage].forEach((storage) => {
+    for (let index = storage.length - 1; index >= 0; index -= 1) {
+      const key = storage.key(index);
+      if (key?.startsWith(prefix)) {
+        storage.removeItem(key);
+      }
+    }
+  });
 }
 
 function isExpired(value?: string) {
@@ -464,6 +476,8 @@ export async function saveAssessmentAttemptProgress({
   assessmentId,
   answers,
   questionStatuses,
+  questionRemainingSeconds,
+  questionDeadlines,
   currentSectionSlug,
   currentQuestionId,
   questionDurations,
@@ -473,6 +487,8 @@ export async function saveAssessmentAttemptProgress({
   assessmentId: string;
   answers: AssessmentAnswers;
   questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
+  questionRemainingSeconds?: Record<string, number>;
+  questionDeadlines?: Record<string, string>;
   currentSectionSlug?: string;
   currentQuestionId?: string;
   questionDurations?: Record<string, number>;
@@ -486,6 +502,8 @@ export async function saveAssessmentAttemptProgress({
       assessmentId,
       answers,
       questionStatuses,
+      questionRemainingSeconds,
+      questionDeadlines,
       currentSectionSlug,
       currentQuestionId,
       questionDurations,
@@ -734,12 +752,8 @@ export function clearAssessmentViolations() {
 }
 
 function clearCandidateAssessmentRuntime(sections: AssessmentSection[]) {
-  window.localStorage.removeItem("kgm-hiring-assessment-answers");
+  clearBrowserStorageByPrefix("kgm-hiring-assessment-");
   window.localStorage.removeItem(QUESTION_STATUS_STORAGE_KEY);
-  window.localStorage.removeItem("kgm-hiring-assessment-current-section");
-  window.localStorage.removeItem("kgm-hiring-assessment-current-question");
-  window.sessionStorage.removeItem("kgm-hiring-assessment-current-section");
-  window.sessionStorage.removeItem("kgm-hiring-assessment-current-question");
 
   sections.forEach((section) => {
     const sectionTimerKey = `kgm-hiring-assessment-timer-${section.slug}`;
@@ -757,13 +771,17 @@ function clearCandidateAssessmentRuntime(sections: AssessmentSection[]) {
 }
 
 function clearCandidateBrowserData() {
+  clearBrowserStorageByPrefix("kgm-hiring-candidate-");
   window.localStorage.removeItem(JOBS_STORAGE_KEY);
   window.localStorage.removeItem(CANDIDATES_STORAGE_KEY);
   window.localStorage.removeItem(RESULTS_STORAGE_KEY);
   window.localStorage.removeItem(ATTEMPTS_STORAGE_KEY);
   window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+  window.localStorage.removeItem(VIOLATIONS_STORAGE_KEY);
   window.localStorage.removeItem("kgm-hiring-authenticated");
   window.localStorage.removeItem("kgm-hiring-active-candidate-id");
+  window.sessionStorage.removeItem("kgm-hiring-authenticated");
+  window.sessionStorage.removeItem("kgm-hiring-active-candidate-id");
 }
 
 export async function saveAssessmentResult({

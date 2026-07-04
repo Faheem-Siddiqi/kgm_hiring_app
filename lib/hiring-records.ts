@@ -74,6 +74,7 @@ type CandidateAttemptDocument = {
   currentQuestionId?: string;
   answers: Record<string, string>;
   questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
+  questionRemainingSeconds: Record<string, number>;
   sectionDeadlines: Record<string, Date>;
   questionDeadlines: Record<string, Date>;
   violations: AssessmentViolationRecord[];
@@ -142,6 +143,7 @@ export type PublicCandidateAttemptRecord = {
   currentQuestionId?: string;
   answers: Record<string, string>;
   questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
+  questionRemainingSeconds: Record<string, number>;
   sectionDeadlines: Record<string, string>;
   questionDeadlines: Record<string, string>;
   violations: Array<Omit<AssessmentViolationRecord, "occurredAt"> & { occurredAt: string }>;
@@ -314,6 +316,7 @@ function toPublicAttempt(attempt: WithId<CandidateAttemptDocument>): PublicCandi
     currentQuestionId: attempt.currentQuestionId,
     answers: attempt.answers ?? {},
     questionStatuses: attempt.questionStatuses ?? {},
+    questionRemainingSeconds: attempt.questionRemainingSeconds ?? {},
     sectionDeadlines: Object.fromEntries(
       Object.entries(attempt.sectionDeadlines ?? {}).map(([key, value]) => [
         key,
@@ -745,6 +748,7 @@ export async function startOrResumeCandidateAttempt({
     updatedAt: now,
     answers: {},
     questionStatuses: {},
+    questionRemainingSeconds: {},
     sectionDeadlines,
     questionDeadlines: {},
     violations: [],
@@ -763,6 +767,8 @@ export async function saveCandidateAttemptProgress({
   assessmentId,
   answers,
   questionStatuses,
+  questionRemainingSeconds,
+  questionDeadlines,
   currentSectionSlug,
   currentQuestionId,
   violations,
@@ -772,6 +778,8 @@ export async function saveCandidateAttemptProgress({
   assessmentId: string;
   answers: Record<string, string>;
   questionStatuses: Record<string, "answered" | "skipped" | "unanswered">;
+  questionRemainingSeconds?: Record<string, number>;
+  questionDeadlines?: Record<string, string>;
   currentSectionSlug?: string;
   currentQuestionId?: string;
   violations?: Array<Omit<AssessmentViolationRecord, "occurredAt"> & { occurredAt: string }>;
@@ -805,6 +813,12 @@ export async function saveCandidateAttemptProgress({
           ),
         }
       : {};
+  const providedQuestionDeadlineUpdates = Object.fromEntries(
+    Object.entries(questionDeadlines ?? {})
+      .map(([questionId, value]) => [questionId, new Date(value)] as const)
+      .filter(([, value]) => Number.isFinite(value.getTime()))
+      .map(([questionId, value]) => [`questionDeadlines.${questionId}`, value]),
+  );
 
   const result = await attempts.findOneAndUpdate(
     {
@@ -818,9 +832,11 @@ export async function saveCandidateAttemptProgress({
         updatedAt: now,
         answers,
         questionStatuses,
+        ...(questionRemainingSeconds ? { questionRemainingSeconds } : {}),
         ...(currentSectionSlug ? { currentSectionSlug } : {}),
         ...(currentQuestionId ? { currentQuestionId } : {}),
         ...questionDeadlineUpdates,
+        ...providedQuestionDeadlineUpdates,
         ...(violations
           ? {
               violations: violations.map((violation) => ({

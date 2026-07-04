@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import {
   useEffect,
+  useCallback,
   useRef,
   useState,
   useSyncExternalStore,
@@ -61,7 +62,10 @@ import {
   exitAssessmentFullscreen,
   getAssessmentFullscreenElement,
 } from "@/features/test/assessment-fullscreen";
-import { assessmentSections } from "@/features/test/assessment-data";
+import {
+  assessmentSections,
+  type AssessmentSection,
+} from "@/features/test/assessment-data";
 import {
   getAnsweredCount,
   getTotalQuestionCount,
@@ -130,14 +134,18 @@ function readStoredNumber(key: string) {
   return Number.isFinite(parsedValue) ? parsedValue : null;
 }
 
-function getStoredQuestionTimeLeft(key: string, fallbackSeconds: number) {
-  const remaining = readStoredNumber(`${key}-remaining`);
-  if (remaining !== null) return Math.max(0, Math.ceil(remaining));
+function finiteNumberOrNull(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
 
+function getStoredQuestionTimeLeft(key: string, fallbackSeconds: number) {
   const deadline = readStoredNumber(key);
   if (deadline !== null) {
     return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
   }
+
+  const remaining = readStoredNumber(`${key}-remaining`);
+  if (remaining !== null) return Math.max(0, Math.ceil(remaining));
 
   return fallbackSeconds;
 }
@@ -174,6 +182,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [isSubmittingAssessment, setIsSubmittingAssessment] = useState(false);
   const [isChangingSection, setIsChangingSection] = useState(false);
+  const [progressRetryNonce, setProgressRetryNonce] = useState(0);
   const [violationCount, setViolationCount] = useState(0);
   const [lastViolationNumber, setLastViolationNumber] = useState<number | null>(
     null,
@@ -186,9 +195,11 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   const isSubmittingAssessmentRef = useRef(false);
   const hasAutoSubmittedRef = useRef(false);
   const restoredAttemptKeyRef = useRef<string | null>(null);
+  const restoredAttemptLocationRef = useRef<string | null>(null);
   const timerEndAtRef = useRef<number | null>(null);
   const questionTimerEndAtRef = useRef<number | null>(null);
   const answersRef = useRef<Record<string, string>>({});
+  const questionStatusesRef = useRef<Record<string, QuestionStatus>>(questionStatuses);
   const submitAssessmentRef = useRef<((status: "Submitted" | "Auto submitted") => Promise<void>) | null>(null);
   const answersSnapshot = useSyncExternalStore(
     subscribeToTestData,
@@ -224,18 +235,24 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   const sectionIndex = activeSections.findIndex((item) => item.slug === section.slug);
   const previousSectionSlug = activeSections[sectionIndex - 1]?.slug;
   const nextSectionSlug = activeSections[sectionIndex + 1]?.slug;
-  const safeCurrentIndex = Math.min(
-    Math.max(0, currentIndex),
-    Math.max(0, section.questions.length - 1),
-  );
+  const hasQuestions = section.questions.length > 0;
+  const safeCurrentIndex = hasQuestions
+    ? Math.min(
+        Math.max(0, currentIndex),
+        Math.max(0, section.questions.length - 1),
+      )
+    : 0;
   const currentQuestion = section.questions[safeCurrentIndex];
+  const currentQuestionId = currentQuestion?.id ?? "";
   const sectionDurationSeconds = getSectionDurationSeconds(section.time);
   const timerStorageKey = `kgm-hiring-assessment-timer-${section.slug}`;
   const [timeLeftSeconds, setTimeLeftSeconds] = useState(sectionDurationSeconds);
   const questionDurationSeconds =
-    currentQuestion.timeLimitSeconds ?? section.questionTimeSeconds ??
-    Math.max(1, Math.floor(sectionDurationSeconds / section.questions.length));
-  const questionTimerStorageKey = `kgm-hiring-assessment-question-timer-${section.slug}-${currentQuestion.id}`;
+    currentQuestion?.timeLimitSeconds ?? section.questionTimeSeconds ??
+    Math.max(1, Math.floor(sectionDurationSeconds / Math.max(1, section.questions.length)));
+  const questionTimerStorageKey = currentQuestionId
+    ? `kgm-hiring-assessment-question-timer-${section.slug}-${currentQuestionId}`
+    : `kgm-hiring-assessment-question-timer-${section.slug}-missing-question`;
   const questionRemainingStorageKey = `${questionTimerStorageKey}-remaining`;
   const [questionTimeLeftSeconds, setQuestionTimeLeftSeconds] =
     useState(questionDurationSeconds);
@@ -244,22 +261,23 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   >("idle");
   const questionIds = section.questions.map((question) => question.id);
   const answeredCount = getAnsweredCount(answers, questionIds);
-  const sectionProgress = Math.round(
-    (answeredCount / section.questions.length) * 100,
-  );
-  const questionProgress = Math.round(
-    ((safeCurrentIndex + 1) / section.questions.length) * 100,
-  );
+  const sectionProgress = section.questions.length
+    ? Math.round((answeredCount / section.questions.length) * 100)
+    : 0;
+  const questionProgress = section.questions.length
+    ? Math.round(((safeCurrentIndex + 1) / section.questions.length) * 100)
+    : 0;
   const isFirstQuestion = safeCurrentIndex === 0;
-  const isLastQuestion = safeCurrentIndex === section.questions.length - 1;
+  const isLastQuestion = hasQuestions && safeCurrentIndex === section.questions.length - 1;
   const isTimeUp = timeLeftSeconds <= 0;
   const isQuestionTimeUp = questionTimeLeftSeconds <= 0;
   const isLastMinute = timeLeftSeconds > 0 && timeLeftSeconds <= 60;
-  const hasCurrentAnswer = Boolean(currentQuestion && answers[currentQuestion.id]?.trim());
-  const isCurrentQuestionSubmitted = currentQuestion
-    ? questionStatuses[currentQuestion.id] === "answered"
+  const hasCurrentAnswer = Boolean(currentQuestionId && answers[currentQuestionId]?.trim());
+  const isCurrentQuestionSubmitted = currentQuestionId
+    ? questionStatuses[currentQuestionId] === "answered"
     : false;
-  const isAnswerLocked = isTimeUp || isQuestionTimeUp || isCurrentQuestionSubmitted;
+  const isAnswerLocked =
+    isTimeUp || isQuestionTimeUp || isCurrentQuestionSubmitted;
   const timerProgress = sectionDurationSeconds
     ? Math.round((timeLeftSeconds / sectionDurationSeconds) * 100)
     : 0;
@@ -270,6 +288,8 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   const activeQuestionIds = activeSections.flatMap((assessmentSection) =>
     assessmentSection.questions.map((question) => question.id),
   );
+  const sectionQuestionCount = section.questions.length;
+  const sectionQuestionTimeSeconds = section.questionTimeSeconds;
   const totalAnsweredCount = getAnsweredCount(answers, activeQuestionIds);
   const inviteExpiryTime = activeCandidate?.inviteExpiresAt
     ? new Date(activeCandidate.inviteExpiresAt).getTime()
@@ -282,28 +302,171 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
         activeAttempt.currentQuestionId ?? "",
         JSON.stringify(activeAttempt.answers ?? {}),
         JSON.stringify(activeAttempt.questionStatuses ?? {}),
+        JSON.stringify(activeAttempt.questionRemainingSeconds ?? {}),
+        JSON.stringify(activeAttempt.questionDeadlines ?? {}),
       ].join("|")
     : "";
+
+  const collectQuestionRemainingSeconds = useCallback(() => {
+    const remainingSeconds: Record<string, number> = {};
+
+    activeSections.forEach((assessmentSection) => {
+      assessmentSection.questions.forEach((question) => {
+        if (questionStatuses[question.id] !== "skipped") return;
+
+        const key = `kgm-hiring-assessment-question-timer-${assessmentSection.slug}-${question.id}`;
+        const storedRemaining = readStoredNumber(`${key}-remaining`);
+        const serverRemaining = activeAttempt?.questionRemainingSeconds?.[question.id];
+        const remaining =
+          storedRemaining ?? finiteNumberOrNull(serverRemaining);
+
+        if (remaining !== null && remaining > 0) {
+          remainingSeconds[question.id] = Math.ceil(remaining);
+        }
+      });
+    });
+
+    return remainingSeconds;
+  }, [activeAttempt?.questionRemainingSeconds, activeSections, questionStatuses]);
+
+  const collectQuestionDeadlineUpdates = useCallback(() => {
+    if (!currentQuestionId) return {};
+    const status = questionStatuses[currentQuestionId];
+
+    if (status === "answered" || status === "skipped" || status === "unanswered") {
+      return {};
+    }
+
+    const deadline = readStoredNumber(questionTimerStorageKey);
+
+    if (deadline === null || deadline <= Date.now()) {
+      return {};
+    }
+
+    return { [currentQuestionId]: new Date(deadline).toISOString() };
+  }, [currentQuestionId, questionStatuses, questionTimerStorageKey]);
+
+  const getQuestionDurationFor = useCallback(
+    (question: AssessmentSection["questions"][number]) =>
+      question.timeLimitSeconds ?? sectionQuestionTimeSeconds ??
+      Math.max(1, Math.floor(sectionDurationSeconds / Math.max(1, sectionQuestionCount))),
+    [sectionQuestionCount, sectionQuestionTimeSeconds, sectionDurationSeconds],
+  );
+
+  const activateSkippedQuestion = useCallback(
+    (
+      index: number,
+      statusSource: Record<string, QuestionStatus> = questionStatusesRef.current,
+      remainingSource: Record<string, number> | undefined = activeAttempt?.questionRemainingSeconds,
+    ) => {
+      const targetQuestion = section.questions[index];
+      if (!targetQuestion) return false;
+      if (statusSource[targetQuestion.id] !== "skipped") return true;
+
+      const key = `kgm-hiring-assessment-question-timer-${section.slug}-${targetQuestion.id}`;
+      const storedRemaining = readStoredNumber(`${key}-remaining`);
+      const serverRemaining = remainingSource?.[targetQuestion.id];
+      const remainingSeconds = Math.max(
+        0,
+        Math.ceil(
+          storedRemaining ??
+            finiteNumberOrNull(serverRemaining) ??
+            0,
+        ),
+      );
+
+      if (remainingSeconds <= 0) {
+        const next: Record<string, QuestionStatus> = {
+          ...statusSource,
+          ...questionStatusesRef.current,
+          [targetQuestion.id]: "unanswered",
+        };
+        questionStatusesRef.current = next;
+        window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
+        setQuestionStatuses(next);
+        clearStoredDeadline(key);
+        window.localStorage.setItem(`${key}-remaining`, "0");
+        window.sessionStorage.setItem(`${key}-remaining`, "0");
+        return false;
+      }
+
+      const nextDeadline = Date.now() + remainingSeconds * 1000;
+      const nextStatuses: Record<string, QuestionStatus> = {
+        ...statusSource,
+        ...questionStatusesRef.current,
+      };
+      delete nextStatuses[targetQuestion.id];
+
+      writeStoredDeadline(key, nextDeadline);
+      clearStoredDeadline(`${key}-remaining`);
+      questionStatusesRef.current = nextStatuses;
+      window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(nextStatuses));
+      setQuestionStatuses(nextStatuses);
+
+      if (targetQuestion.id === currentQuestionId) {
+        questionTimerEndAtRef.current = nextDeadline;
+        setQuestionTimeLeftSeconds(remainingSeconds);
+      }
+
+      return true;
+    },
+    [
+      activeAttempt?.questionRemainingSeconds,
+      currentQuestionId,
+      section.questions,
+      section.slug,
+    ],
+  );
 
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
 
   useEffect(() => {
+    questionStatusesRef.current = questionStatuses;
+  }, [questionStatuses]);
+
+  useEffect(() => {
     if (!activeAttempt) return;
     if (restoredAttemptKeyRef.current === activeAttemptRestoreKey) return;
     restoredAttemptKeyRef.current = activeAttemptRestoreKey;
 
-    if (Object.keys(activeAttempt.answers).length) {
-      writeStoredAnswers(activeAttempt.answers);
+    const activeQuestionIdSet = new Set(
+      activeSections.flatMap((assessmentSection) =>
+        assessmentSection.questions.map((question) => question.id),
+      ),
+    );
+    const localActiveAnswers = Object.fromEntries(
+      Object.entries(answers).filter(([questionId]) =>
+        activeQuestionIdSet.has(questionId),
+      ),
+    );
+    const restoredAnswers = {
+      ...activeAttempt.answers,
+      ...localActiveAnswers,
+    };
+
+    if (Object.keys(restoredAnswers).length) {
+      writeStoredAnswers(restoredAnswers);
     }
 
-    if (Object.keys(activeAttempt.questionStatuses).length) {
+    const localActiveStatuses = Object.fromEntries(
+      Object.entries(readQuestionStatuses()).filter(([questionId]) =>
+        activeQuestionIdSet.has(questionId),
+      ),
+    ) as Record<string, QuestionStatus>;
+    const restoredQuestionStatuses = {
+      ...activeAttempt.questionStatuses,
+      ...localActiveStatuses,
+    };
+
+    if (Object.keys(restoredQuestionStatuses).length) {
+      questionStatusesRef.current = restoredQuestionStatuses;
       window.localStorage.setItem(
         QUESTION_STATUS_STORAGE_KEY,
-        JSON.stringify(activeAttempt.questionStatuses),
+        JSON.stringify(restoredQuestionStatuses),
       );
-      window.setTimeout(() => setQuestionStatuses(activeAttempt.questionStatuses), 0);
+      window.setTimeout(() => setQuestionStatuses(restoredQuestionStatuses), 0);
     }
 
     const serverTimeOffsetMs = activeAttempt.serverNow
@@ -328,31 +491,97 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
           .find((item) => item.questionId === questionId);
 
         if (question) {
-          writeStoredDeadline(
-            `kgm-hiring-assessment-question-timer-${question.sectionSlug}-${questionId}`,
-            value,
-          );
+          const key = `kgm-hiring-assessment-question-timer-${question.sectionSlug}-${questionId}`;
+          const hasPausedRemaining = readStoredNumber(`${key}-remaining`) !== null;
+          const hasServerPausedRemaining =
+            activeAttempt.questionRemainingSeconds?.[questionId] !== undefined;
+          if (
+            restoredQuestionStatuses[questionId] !== "skipped" ||
+            (!hasPausedRemaining && !hasServerPausedRemaining)
+          ) {
+            writeStoredDeadline(key, value);
+          }
         }
       }
     });
 
-    if (activeAttempt.currentQuestionId) {
+    Object.entries(activeAttempt.questionRemainingSeconds ?? {}).forEach(([questionId, seconds]) => {
+      if (restoredQuestionStatuses[questionId] !== "skipped") return;
+      if (!Number.isFinite(seconds) || seconds <= 0) return;
+
+      const question = activeSections
+        .flatMap((assessmentSection) => assessmentSection.questions.map((item) => ({
+          sectionSlug: assessmentSection.slug,
+          questionId: item.id,
+        })))
+        .find((item) => item.questionId === questionId);
+
+      if (!question) return;
+
+      const key = `kgm-hiring-assessment-question-timer-${question.sectionSlug}-${questionId}`;
+      window.localStorage.setItem(`${key}-remaining`, String(Math.ceil(seconds)));
+      window.sessionStorage.setItem(`${key}-remaining`, String(Math.ceil(seconds)));
+      clearStoredDeadline(key);
+    });
+
+    const restoreLocationKey = `${activeAttempt.id}|${section.slug}`;
+    if (
+      activeAttempt.currentQuestionId &&
+      restoredAttemptLocationRef.current !== restoreLocationKey
+    ) {
+      restoredAttemptLocationRef.current = restoreLocationKey;
       const restoredIndex = section.questions.findIndex(
         (question) => question.id === activeAttempt.currentQuestionId,
       );
       if (restoredIndex >= 0) {
-        window.setTimeout(() => setCurrentIndex(restoredIndex), 0);
+        window.setTimeout(() => {
+          if (
+            activeAttempt.currentQuestionId &&
+            restoredQuestionStatuses[activeAttempt.currentQuestionId] === "skipped" &&
+            !activateSkippedQuestion(
+              restoredIndex,
+              restoredQuestionStatuses,
+              activeAttempt.questionRemainingSeconds,
+            )
+          ) {
+            return;
+          }
+
+          setCurrentIndex(restoredIndex);
+        }, 0);
       }
     }
-  }, [activeAttempt, activeAttemptRestoreKey, activeSections, section.questions]);
+  }, [activateSkippedQuestion, activeAttempt, activeAttemptRestoreKey, activeSections, answers, section.questions, section.slug]);
 
   useEffect(() => {
+    if (!currentQuestionId) return;
     window.localStorage.setItem(CURRENT_SECTION_STORAGE_KEY, section.slug);
-    window.localStorage.setItem(CURRENT_QUESTION_STORAGE_KEY, currentQuestion.id);
-  }, [currentQuestion.id, section.slug]);
+    window.localStorage.setItem(CURRENT_QUESTION_STORAGE_KEY, currentQuestionId);
+  }, [currentQuestionId, section.slug]);
+
+  useEffect(() => {
+    function requestProgressRetry() {
+      setProgressRetryNonce((value) => value + 1);
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        requestProgressRetry();
+      }
+    }
+
+    window.addEventListener("online", requestProgressRetry);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("online", requestProgressRetry);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeCandidateId || !activeAssessment?.id) return;
+    if (!currentQuestionId) return;
 
     const timeoutId = window.setTimeout(() => {
       void saveAssessmentAttemptProgress({
@@ -360,17 +589,19 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
         assessmentId: activeAssessment.id,
         answers: JSON.parse(answersSnapshot) as Record<string, string>,
         questionStatuses,
+        questionRemainingSeconds: collectQuestionRemainingSeconds(),
+        questionDeadlines: collectQuestionDeadlineUpdates(),
         currentSectionSlug: section.slug,
-        currentQuestionId: currentQuestion.id,
+        currentQuestionId,
         questionDurations: {
-          [currentQuestion.id]: questionDurationSeconds,
+          [currentQuestionId]: questionDurationSeconds,
         },
         violations: readAssessmentViolations(),
       }).catch(() => undefined);
     }, 250);
 
     return () => window.clearTimeout(timeoutId);
-  }, [activeAssessment?.id, activeCandidateId, answersSnapshot, currentQuestion.id, questionDurationSeconds, questionStatuses, section.slug]);
+  }, [activeAssessment?.id, activeCandidateId, answersSnapshot, collectQuestionDeadlineUpdates, collectQuestionRemainingSeconds, currentQuestionId, progressRetryNonce, questionDurationSeconds, questionStatuses, section.slug]);
 
   useEffect(() => {
     if (!Number.isFinite(inviteExpiryTime)) return;
@@ -501,7 +732,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     const serverTimeOffsetMs = activeAttempt?.serverNow
       ? Date.now() - new Date(activeAttempt.serverNow).getTime()
       : 0;
-    const serverEndAt = activeAttempt?.sectionDeadlines[section.slug]
+    const serverEndAt = activeAttempt?.sectionDeadlines?.[section.slug]
       ? new Date(activeAttempt.sectionDeadlines[section.slug]).getTime() + serverTimeOffsetMs
       : null;
     const storedEndAt = serverEndAt ?? readStoredDeadline(timerStorageKey);
@@ -528,27 +759,42 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   }, [activeAttempt, section.slug, sectionDurationSeconds, timerStorageKey]);
 
   useEffect(() => {
+    if (!currentQuestionId) return;
+
+    const currentStatus = questionStatuses[currentQuestionId];
+    if (currentStatus === "skipped") {
+      const storedRemaining = readStoredNumber(questionRemainingStorageKey);
+      const serverRemaining = activeAttempt?.questionRemainingSeconds?.[currentQuestionId];
+      const remainingSeconds = Math.max(
+        0,
+        Math.ceil(
+          storedRemaining ??
+            finiteNumberOrNull(serverRemaining) ??
+            0,
+        ),
+      );
+
+      questionTimerEndAtRef.current = null;
+      const timeoutId = window.setTimeout(() => {
+        setQuestionTimeLeftSeconds(remainingSeconds);
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
+    }
+
     const serverTimeOffsetMs = activeAttempt?.serverNow
       ? Date.now() - new Date(activeAttempt.serverNow).getTime()
       : 0;
-    const serverEndAt = activeAttempt?.questionDeadlines[currentQuestion.id]
-      ? new Date(activeAttempt.questionDeadlines[currentQuestion.id]).getTime() + serverTimeOffsetMs
+    const serverEndAt = activeAttempt?.questionDeadlines?.[currentQuestionId]
+      ? new Date(activeAttempt.questionDeadlines[currentQuestionId]).getTime() + serverTimeOffsetMs
       : null;
-    const storedEndAt = serverEndAt ?? readStoredDeadline(questionTimerStorageKey);
-    const pausedSeconds =
-      questionStatuses[currentQuestion.id] === "skipped"
-        ? readStoredNumber(questionRemainingStorageKey)
-        : null;
+    const storedEndAt = readStoredDeadline(questionTimerStorageKey) ?? serverEndAt;
     const endAt =
       storedEndAt ??
-      Date.now() + (pausedSeconds ?? questionDurationSeconds) * 1000;
+      Date.now() + questionDurationSeconds * 1000;
     questionTimerEndAtRef.current = endAt;
 
     if (!storedEndAt) {
       writeStoredDeadline(questionTimerStorageKey, endAt);
-      if (pausedSeconds === null) {
-        clearStoredDeadline(questionRemainingStorageKey);
-      }
     }
 
     function updateQuestionTimer() {
@@ -564,47 +810,112 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     const intervalId = window.setInterval(updateQuestionTimer, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [activeAttempt, currentQuestion.id, questionDurationSeconds, questionRemainingStorageKey, questionStatuses, questionTimerStorageKey]);
+  }, [activeAttempt, currentQuestionId, questionDurationSeconds, questionRemainingStorageKey, questionStatuses, questionTimerStorageKey]);
 
   function writeQuestionStatus(questionId: string, status: QuestionStatus) {
-    const next = { ...questionStatuses, [questionId]: status };
+    const next = { ...questionStatusesRef.current, [questionId]: status };
+    questionStatusesRef.current = next;
     window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
     setQuestionStatuses(next);
+    return next;
   }
 
   function clearQuestionStatus(questionId: string) {
-    if (!questionStatuses[questionId]) return;
+    if (!questionStatusesRef.current[questionId]) return questionStatusesRef.current;
 
-    const next = { ...questionStatuses };
+    const next = { ...questionStatusesRef.current };
     delete next[questionId];
+    questionStatusesRef.current = next;
     window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
     setQuestionStatuses(next);
+    return next;
   }
 
   function moveToQuestion(index: number) {
-    if (isTimeUp || index === safeCurrentIndex) return;
-    const targetQuestion = section.questions[index];
-    if (!targetQuestion) return;
-
-    const targetAnswer = answersRef.current[targetQuestion.id]?.trim();
-    const targetStatus = questionStatuses[targetQuestion.id];
-    const targetDurationSeconds =
-      targetQuestion.timeLimitSeconds ?? section.questionTimeSeconds ??
-      Math.max(1, Math.floor(sectionDurationSeconds / section.questions.length));
-    const targetTimeLeft = getStoredQuestionTimeLeft(
-      `kgm-hiring-assessment-question-timer-${section.slug}-${targetQuestion.id}`,
-      targetDurationSeconds,
-    );
-
-    if (targetAnswer || targetStatus === "answered" || targetStatus === "unanswered" || targetTimeLeft <= 0) {
+    if (isTimeUp) return;
+    if (index === safeCurrentIndex) {
+      if (currentQuestionId && questionStatusesRef.current[currentQuestionId] === "skipped") {
+        activateSkippedQuestion(index);
+      }
       return;
     }
-
+    if (!canOpenQuestion(index)) return;
+    if (!activateSkippedQuestion(index)) return;
     setCurrentIndex(index);
   }
 
+  const canOpenQuestion = useCallback((index: number) => {
+    const targetQuestion = section.questions[index];
+    if (!targetQuestion) return false;
+
+    const targetAnswer = answersRef.current[targetQuestion.id]?.trim();
+    const targetStatus = questionStatusesRef.current[targetQuestion.id];
+    const targetDurationSeconds = getQuestionDurationFor(targetQuestion);
+    const targetKey = `kgm-hiring-assessment-question-timer-${section.slug}-${targetQuestion.id}`;
+    const storedRemaining = readStoredNumber(`${targetKey}-remaining`);
+    const serverRemaining = activeAttempt?.questionRemainingSeconds?.[targetQuestion.id];
+    const targetTimeLeft = getStoredQuestionTimeLeft(
+      targetKey,
+      targetDurationSeconds,
+    );
+    const skippedTimeLeft = Math.max(
+      0,
+      Math.ceil(
+        storedRemaining ??
+          finiteNumberOrNull(serverRemaining) ??
+          0,
+      ),
+    );
+
+    return (
+      targetStatus !== "answered" &&
+      targetStatus !== "unanswered" &&
+      (targetStatus === "skipped"
+        ? skippedTimeLeft > 0
+        : !targetAnswer && targetTimeLeft > 0)
+    );
+  }, [activeAttempt?.questionRemainingSeconds, getQuestionDurationFor, section.questions, section.slug]);
+
+  const findNextOpenQuestionIndex = useCallback((startIndex: number, wrap = false, excludedIndex?: number) => {
+    for (let index = startIndex; index < section.questions.length; index += 1) {
+      if (index === excludedIndex) continue;
+      if (canOpenQuestion(index)) return index;
+    }
+
+    if (wrap) {
+      for (let index = 0; index < Math.min(startIndex, section.questions.length); index += 1) {
+        if (index === excludedIndex) continue;
+        if (canOpenQuestion(index)) return index;
+      }
+    }
+
+    return null;
+  }, [canOpenQuestion, section.questions.length]);
+
+  function moveToNextAvailableQuestionOrSection(startIndex: number, excludedIndex?: number) {
+    const nextIndex = findNextOpenQuestionIndex(startIndex, true, excludedIndex);
+    if (nextIndex !== null) {
+      setCurrentIndex(nextIndex);
+      return true;
+    }
+
+    if (nextSectionSlug) {
+      setIsChangingSection(true);
+      router.push(`/assessment/${nextSectionSlug}`);
+      return true;
+    }
+
+    return false;
+  }
+
   function markCurrentQuestionSkipped() {
-    if (isTimeUp || isQuestionTimeUp || hasCurrentAnswer) {
+    if (
+      !currentQuestionId ||
+      isTimeUp ||
+      isQuestionTimeUp ||
+      questionStatusesRef.current[currentQuestionId] === "answered" ||
+      questionStatusesRef.current[currentQuestionId] === "unanswered"
+    ) {
       return false;
     }
 
@@ -618,7 +929,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
     );
     clearStoredDeadline(questionTimerStorageKey);
     questionTimerEndAtRef.current = null;
-    writeQuestionStatus(currentQuestion.id, "skipped");
+    writeQuestionStatus(currentQuestionId, "skipped");
     return true;
   }
 
@@ -627,31 +938,38 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
       return;
     }
 
-    if (!isLastQuestion) {
-      setCurrentIndex((index) => Math.min(index + 1, section.questions.length - 1));
+    if (!moveToNextAvailableQuestionOrSection(safeCurrentIndex + 1, safeCurrentIndex)) {
+      activateSkippedQuestion(safeCurrentIndex);
+      toast.info("No other available question remains in this section.");
     }
   }
 
   function submitCurrentAnswer() {
-    if (!hasCurrentAnswer || isQuestionTimeUp || isTimeUp) {
+    if (
+      !currentQuestionId ||
+      !answersRef.current[currentQuestionId]?.trim() ||
+      isQuestionTimeUp ||
+      isTimeUp
+    ) {
       return false;
     }
 
-    writeQuestionStatus(currentQuestion.id, "answered");
+    writeQuestionStatus(currentQuestionId, "answered");
     window.localStorage.removeItem(questionRemainingStorageKey);
     window.sessionStorage.removeItem(questionRemainingStorageKey);
     return true;
   }
 
   useEffect(() => {
-    if (!isQuestionTimeUp || isTimeUp) return;
+    if (!currentQuestionId || !isQuestionTimeUp || isTimeUp) return;
 
     const timeoutId = window.setTimeout(() => {
       setQuestionStatuses((current) => {
         const next: Record<string, QuestionStatus> = {
           ...current,
-          [currentQuestion.id]: "unanswered",
+          [currentQuestionId]: "unanswered",
         };
+        questionStatusesRef.current = next;
         window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
         return next;
       });
@@ -659,13 +977,17 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
       window.localStorage.setItem(questionRemainingStorageKey, "0");
       window.sessionStorage.removeItem(questionTimerStorageKey);
       window.localStorage.removeItem(questionTimerStorageKey);
-      if (!isLastQuestion) {
-        setCurrentIndex((index) => Math.min(index + 1, section.questions.length - 1));
+      const nextIndex = findNextOpenQuestionIndex(safeCurrentIndex + 1, true);
+      if (nextIndex !== null) {
+        setCurrentIndex(nextIndex);
+      } else if (nextSectionSlug) {
+        setIsChangingSection(true);
+        router.push(`/assessment/${nextSectionSlug}`);
       }
     }, 400);
 
     return () => window.clearTimeout(timeoutId);
-  }, [currentQuestion.id, isLastQuestion, isQuestionTimeUp, isTimeUp, questionRemainingStorageKey, questionTimerStorageKey, section.questions.length]);
+  }, [currentQuestionId, findNextOpenQuestionIndex, isQuestionTimeUp, isTimeUp, nextSectionSlug, questionRemainingStorageKey, questionTimerStorageKey, router, safeCurrentIndex]);
 
   useEffect(() => {
     if (
@@ -686,6 +1008,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
           next[question.id] = "unanswered";
         }
       });
+      questionStatusesRef.current = next;
       window.localStorage.setItem(QUESTION_STATUS_STORAGE_KEY, JSON.stringify(next));
       return next;
     });
@@ -705,26 +1028,44 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   }, [nextSectionSlug, previousSectionSlug, router]);
 
   function updateAnswer(questionId: string, value: string) {
-    if (isAnswerLocked || questionStatuses[questionId] === "answered") {
+    if (isAnswerLocked || questionStatusesRef.current[questionId] === "answered") {
+      return;
+    }
+
+    if (
+      questionId === currentQuestionId &&
+      questionStatusesRef.current[questionId] === "skipped" &&
+      !activateSkippedQuestion(safeCurrentIndex)
+    ) {
       return;
     }
 
     const nextAnswers = {
-      ...answers,
+      ...answersRef.current,
       [questionId]: value,
     };
 
     clearQuestionStatus(questionId);
+    answersRef.current = nextAnswers;
     writeStoredAnswers(nextAnswers);
   }
 
   function toggleMultiAnswer(questionId: string, option: string) {
-    if (isAnswerLocked || questionStatuses[questionId] === "answered") {
+    if (isAnswerLocked || questionStatusesRef.current[questionId] === "answered") {
       return;
     }
 
-    const existingValues = answers[questionId]
-      ? answers[questionId].split("||").filter(Boolean)
+    if (
+      questionId === currentQuestionId &&
+      questionStatusesRef.current[questionId] === "skipped" &&
+      !activateSkippedQuestion(safeCurrentIndex)
+    ) {
+      return;
+    }
+
+    const existingValue = answersRef.current[questionId] ?? "";
+    const existingValues = existingValue
+      ? existingValue.split("||").filter(Boolean)
       : [];
     const isSelected = existingValues.includes(option);
     const nextValues = isSelected
@@ -732,10 +1073,12 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
       : [...existingValues, option];
 
     clearQuestionStatus(questionId);
-    writeStoredAnswers({
-      ...answers,
+    const nextAnswers = {
+      ...answersRef.current,
       [questionId]: nextValues.join("||"),
-    });
+    };
+    answersRef.current = nextAnswers;
+    writeStoredAnswers(nextAnswers);
   }
 
   function preventContentCopy(event: React.ClipboardEvent | React.MouseEvent) {
@@ -762,18 +1105,23 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   function finishSubmittedAssessment() {
     setShowCompletionDialog(false);
     void exitAssessmentFullscreen();
-    router.replace("/jobs");
+    window.location.replace("/jobs");
   }
 
   function requestManualSubmit() {
     if (isSubmittingAssessment) return;
-    if (hasCurrentAnswer && questionStatuses[currentQuestion.id] !== "answered") {
-      writeQuestionStatus(currentQuestion.id, "answered");
+    if (
+      currentQuestionId &&
+      answersRef.current[currentQuestionId]?.trim() &&
+      questionStatusesRef.current[currentQuestionId] !== "answered"
+    ) {
+      writeQuestionStatus(currentQuestionId, "answered");
     }
     setShowSubmitConfirm(true);
   }
 
   function readQuestionAloud() {
+    if (!currentQuestion) return;
     if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
       setSpeechStatus("unsupported");
       return;
@@ -863,6 +1211,29 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             <CardContent>
               <Button asChild>
                 <Link href="/jobs">Go to jobs</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
+      </main>
+    );
+  }
+
+  if (!currentQuestion) {
+    return (
+      <main className="min-h-svh bg-background px-4 py-20 text-foreground sm:px-6 lg:px-8">
+        <section className="mx-auto w-full max-w-3xl">
+          <Card>
+            <CardHeader>
+              <CardTitle>Assessment unavailable</CardTitle>
+              <CardDescription>
+                This section has no available questions. Please return to the
+                assessment overview and choose another section.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild>
+                <Link href="/assessment">Back to assessment overview</Link>
               </Button>
             </CardContent>
           </Card>
@@ -1183,7 +1554,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
 
                 <div className="flex flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
                   <Button
-                    disabled={isFirstQuestion}
+                    disabled={isFirstQuestion || !canOpenQuestion(safeCurrentIndex - 1)}
                     onClick={() => {
                       moveToQuestion(safeCurrentIndex - 1);
                     }}
@@ -1197,7 +1568,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={isTimeUp || isQuestionTimeUp || hasCurrentAnswer}
+                    disabled={isTimeUp || isQuestionTimeUp || isCurrentQuestionSubmitted}
                     onClick={skipCurrentQuestion}
                   >
                     Skip for now
@@ -1236,11 +1607,13 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
                     <Button
                       disabled={isTimeUp || !hasCurrentAnswer}
                       onClick={() => {
-                        if (hasCurrentAnswer && !submitCurrentAnswer()) {
+                        if (!submitCurrentAnswer()) {
                           return;
                         }
 
-                        moveToQuestion(safeCurrentIndex + 1);
+                        if (!moveToNextAvailableQuestionOrSection(safeCurrentIndex + 1)) {
+                          setShowSubmitConfirm(true);
+                        }
                       }}
                     >
                       Next
