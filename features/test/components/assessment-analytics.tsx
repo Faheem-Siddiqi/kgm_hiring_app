@@ -128,7 +128,6 @@ function useAdminData() {
               timePerSectionMinutes,
               questionsPerTest: assessment.totalQuestions,
               questionsPerSection,
-              dummyQuestionsPerSection: 0,
               sectionTypeConfigs,
             };
           }),
@@ -235,8 +234,8 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
     ) ?? assessmentResults[0];
   const selectedCv =
     selectedCvUrl ||
-    assessmentCandidates[0]?.cvUrl ||
-    "https://drive.google.com/file/d/sample-cv-preview/view";
+    assessmentCandidates.find((candidate) => candidate.cvUrl)?.cvUrl ||
+    "";
   const resourceSummary = assessmentResourceSummaries.find(
     (resource) => resource.id === assessment?.resourceId,
   );
@@ -681,7 +680,7 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                     type="email"
                     value={candidateEmail}
                     onChange={(event) => setCandidateEmail(event.target.value)}
-                    placeholder="candidate@example.com"
+                    placeholder="Candidate email"
                   />
                 </div>
                 <Button className="self-end" type="submit" disabled={isSendingInvite}>
@@ -807,9 +806,10 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
                         <Button
                           className="mt-1 h-auto p-0"
                           variant="link"
+                          disabled={!candidate.cvUrl}
                           onClick={() => setSelectedCvUrl(candidate.cvUrl)}
                         >
-                          Preview
+                          {candidate.cvUrl ? "Preview" : "No CV"}
                         </Button>
                       </div>
                     </div>
@@ -878,13 +878,19 @@ export function AssessmentAnalytics({ assessmentId }: { assessmentId: string }) 
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="overflow-hidden rounded-md border bg-muted/30">
-                <iframe
-                  title="Candidate CV preview"
-                  src={selectedCv}
-                  className="h-[480px] w-full bg-background"
-                />
-              </div>
+              {selectedCv ? (
+                <div className="overflow-hidden rounded-md border bg-muted/30">
+                  <iframe
+                    title="Candidate CV preview"
+                    src={selectedCv}
+                    className="h-[480px] w-full bg-background"
+                  />
+                </div>
+              ) : (
+                <div className="rounded-md border bg-muted/30 p-6 text-sm text-muted-foreground">
+                  No CV is available for the selected candidate invite.
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

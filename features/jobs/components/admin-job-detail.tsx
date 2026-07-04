@@ -129,7 +129,6 @@ function runtimeAssessmentFromJob(job: PublicJob, assessment: JobAssessmentOptio
     timePerSectionMinutes: 15,
     questionsPerTest: 20,
     questionsPerSection: 20,
-    dummyQuestionsPerSection: 0,
   };
 }
 

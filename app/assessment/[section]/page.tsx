@@ -1,11 +1,9 @@
-import {
-  assessmentSections,
-} from "@/features/test/assessment-data";
+import { getAssessmentResourceSectionSlugs } from "@/features/test/assessment-resources";
 import { SectionRunner } from "@/features/test/components/section-runner";
 
 export function generateStaticParams() {
-  return assessmentSections.map((section) => ({
-    section: section.slug,
+  return getAssessmentResourceSectionSlugs().map((section) => ({
+    section,
   }));
 }
 

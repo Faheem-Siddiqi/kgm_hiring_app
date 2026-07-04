@@ -182,7 +182,7 @@ function getStatusMeta(
       label: "In Progress",
       buttonLabel: "Continue Assessment",
       icon: TimerReset,
-      badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+      badgeClass: "border-primary/20 bg-primary/10 text-primary",
     };
   }
 
@@ -249,12 +249,12 @@ export function TestOverview() {
 
   const [isInviteExpired, setIsInviteExpired] = useState(false);
 
-  const assessmentSections = readActiveAssessmentSections() as SectionPreview[];
+  const activeSections = readActiveAssessmentSections() as SectionPreview[];
   const totalQuestions = getTotalQuestionCount();
 
   const answeredQuestions = getAnsweredCount(
     answers,
-    assessmentSections.flatMap((section) =>
+    activeSections.flatMap((section) =>
       section.questions.map((question) => question.id),
     ),
   );
@@ -550,12 +550,17 @@ className=' lg:my-5 mb-5'
 
                       <CardContent className="space-y-4 p-4 sm:p-5">
                         <div className="space-y-3">
-                          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                          <div className="flex flex-col gap-1  sm:flex-row sm:items-end sm:justify-between">
                             <div>
+                              
+                               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                               <CardTitle className="text-base">
                                 Sections
                               </CardTitle>
 
+
+                              <Badge variant="secondary" className="w-fit rounded-[6px] px-2 " > {activeSections.length || assessment.sectionCount}{" "} sections </Badge>
+</div>
                               <CardDescription className="mt-1 max-w-2xl text-sm leading-6">
                                 Open any available section. Progress, answers,
                                 and paused skipped-question timers are saved
@@ -563,18 +568,11 @@ className=' lg:my-5 mb-5'
                               </CardDescription>
                             </div>
 
-                            <Badge
-                              variant="secondary"
-                              className="w-fit rounded-[6px] px-2"
-                            >
-                              {assessmentSections.length ||
-                                assessment.sectionCount}{" "}
-                              sections
-                            </Badge>
+                          
                           </div>
 
                           <div className="flex flex-col gap-2">
-                            {assessmentSections.map((section, sectionIndex) => {
+                            {activeSections.map((section, sectionIndex) => {
                               const sectionOpeningKey = `${assessment.id}:${section.slug}`;
                               const isThisSectionOpening =
                                 openingTarget === sectionOpeningKey;
@@ -645,7 +643,7 @@ className=' lg:my-5 mb-5'
                                           Questions
                                         </p>
 
-                                        <p className="mt-1 font-semibold">
+                                        <p className="mt-1 text-xs mt-2">
                                           {section.questions.length}
                                         </p>
                                       </div>
@@ -656,7 +654,7 @@ className=' lg:my-5 mb-5'
                                           Types
                                         </p>
 
-                                        <p className="mt-1 max-w-[220px] truncate font-semibold">
+                                        <p className="mt-1 max-w-[220px] truncate text-xs   mt-2">
                                           {getQuestionTypeLabel(section)}
                                         </p>
                                       </div>
@@ -667,7 +665,7 @@ className=' lg:my-5 mb-5'
                                           Total time
                                         </p>
 
-                                        <p className="mt-1 font-semibold">
+                                        <p className="mt-1 text-xs mt-2">
                                           {getSectionTime(
                                             section,
                                             assessment.timePerSectionMinutes,
@@ -738,7 +736,7 @@ className=' lg:my-5 mb-5'
                         <FileText className="mb-3 size-5 text-muted-foreground" />
                         <p className="text-sm font-medium">Sections</p>
                         <p className="mt-1 text-2xl font-semibold">
-                          {assessmentSections.length}
+                          {activeSections.length}
                         </p>
                       </div>
 
@@ -769,16 +767,10 @@ className=' lg:my-5 mb-5'
 
             <DialogDescription>
               {pendingCandidateAssessments.length
-                ? "Assessment completed. You can return to the main page and open any remaining assessment assigned to this job."
-                : "All assessments assigned to this job are completed. This OTP is now closed."}
+                ? "Your assessment was submitted successfully. You can return to the main page and open any remaining assessment assigned to this job."
+                : "Your assessment was submitted successfully. All assessments assigned to this job are completed."}
             </DialogDescription>
           </DialogHeader>
-
-          <div className="rounded-md border bg-muted/30 p-4 text-sm">
-            <span className="font-medium">{answeredQuestions}</span> of{" "}
-            <span className="font-medium">{totalQuestions}</span> questions have
-            saved answers.
-          </div>
 
           <DialogFooter>
             <Button

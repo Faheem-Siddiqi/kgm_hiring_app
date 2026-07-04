@@ -286,7 +286,6 @@ function toDashboardAssessment(assessment: PublicAssessment): JobAssessment {
       1,
       Math.round(assessment.totalQuestions / Math.max(assessment.sectionCount, 1)),
     ),
-    dummyQuestionsPerSection: 0,
   };
 }
 

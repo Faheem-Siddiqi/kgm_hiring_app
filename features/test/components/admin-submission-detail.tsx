@@ -140,7 +140,6 @@ function useAdminData(submissionId: string) {
               timePerSectionMinutes,
               questionsPerTest: assessment.totalQuestions,
               questionsPerSection,
-              dummyQuestionsPerSection: 0,
               sectionTypeConfigs,
             };
           }),

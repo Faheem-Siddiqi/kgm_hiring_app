@@ -1,7 +1,7 @@
 import adminOfficer from "@/features/test/resources/admin-officer.json";
 import assistantHrOfficer from "@/features/test/resources/assistant-hr-officer.json";
 import assistantManager from "@/features/test/resources/assistant-manager.json";
-import type { AssessmentSection, Question } from "@/features/test/assessment-data";
+import type { AssessmentSection, Question } from "@/features/test/assessment-types";
 
 type ResourceOpenQuestion = string;
 
@@ -127,6 +127,16 @@ export function getAssessmentResource(resourceId: string) {
   return (
     assessmentResources.find((resource) => resource.id === resourceId) ??
     assessmentResources[0]
+  );
+}
+
+export function getAssessmentResourceSectionSlugs() {
+  return Array.from(
+    new Set(
+      assessmentResources.flatMap((resource) =>
+        resource.sections.map((section) => section.id),
+      ),
+    ),
   );
 }
 

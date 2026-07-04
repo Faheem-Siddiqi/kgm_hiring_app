@@ -1,13 +1,9 @@
 "use client";
 
-import {
-  assessmentSections,
-  type AssessmentSection,
-} from "@/features/test/assessment-data";
+import type { AssessmentSection } from "@/features/test/assessment-types";
 import {
   assessmentResourceSummaries,
   buildAssessmentSectionsFromResource,
-  getAssessmentResource,
 } from "@/features/test/assessment-resources";
 import type { AssessmentAnswers } from "@/features/test/assessment-storage";
 import type { SectionQuestionTypeConfig } from "@/features/test/assessment-resources";
@@ -42,7 +38,6 @@ export type JobAssessment = {
   timePerSectionMinutes: number;
   questionsPerTest: number;
   questionsPerSection: number;
-  dummyQuestionsPerSection: number;
   sectionTypeConfigs?: Record<string, SectionQuestionTypeConfig>;
 };
 
@@ -118,10 +113,6 @@ function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createOtpCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
 function readJson<T>(key: string, fallback: T) {
   if (typeof window === "undefined") {
     return fallback;
@@ -188,7 +179,6 @@ export function readJobAssessments() {
     timePerSectionMinutes: job.timePerSectionMinutes ?? 15,
     questionsPerTest: job.questionsPerTest ?? 20,
     questionsPerSection: job.questionsPerSection ?? job.questionsPerTest ?? 20,
-    dummyQuestionsPerSection: job.dummyQuestionsPerSection ?? 3,
   }));
 }
 
@@ -232,7 +222,6 @@ function toJobAssessment(assessment: PublicAssessment): JobAssessment {
     timePerSectionMinutes,
     questionsPerTest: assessment.totalQuestions,
     questionsPerSection,
-    dummyQuestionsPerSection: 0,
     sectionTypeConfigs,
   };
 }
@@ -359,15 +348,16 @@ export function readAssessmentViolations() {
 }
 
 export function readActiveJobAssessment() {
-  const jobs = readJobAssessments();
-
   if (typeof window === "undefined") {
-    return jobs[0];
+    return undefined;
   }
 
   const activeJobId = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
+  if (!activeJobId) {
+    return undefined;
+  }
 
-  return jobs.find((job) => job.id === activeJobId) ?? jobs[0];
+  return readJobAssessments().find((job) => job.id === activeJobId);
 }
 
 export function writeActiveJobAssessment(jobId: string) {
@@ -379,7 +369,7 @@ export function readActiveAssessmentSections() {
   const job = readActiveJobAssessment();
 
   if (!job) {
-    return assessmentSections;
+    return [];
   }
 
   return buildAssessmentSectionsFromResource({
@@ -402,41 +392,37 @@ export function createJobAssessment({
   sectionCount,
   timePerSectionMinutes,
   questionsPerSection,
-  dummyQuestionsPerSection = 3,
 }: {
   title: string;
   resourceId: string;
   sectionCount: number;
   timePerSectionMinutes: number;
   questionsPerSection: number;
-  dummyQuestionsPerSection?: number;
 }) {
-  const resource = getAssessmentResource(resourceId);
   const summary = assessmentResourceSummaries.find(
-    (item) => item.id === resource.id,
+    (item) => item.id === resourceId,
   );
+  if (!summary) {
+    throw new Error("Question bank is not available.");
+  }
   const safeSectionCount = Math.min(
     Math.max(1, Math.round(sectionCount)),
-    summary?.sectionCount ?? resource.sections.length,
+    summary.sectionCount,
   );
   const safeQuestionCount = Math.min(
     Math.max(1, Math.round(questionsPerSection)),
-    summary?.maxQuestionsPerSection ?? 20,
+    summary.maxQuestionsPerSection,
   );
   const job: JobAssessment = {
     id: createId("job"),
     title,
-    role: resource.role,
+    role: summary.role,
     createdAt: new Date().toISOString(),
-    resourceId: resource.id,
+    resourceId: summary.id,
     sectionCount: safeSectionCount,
     timePerSectionMinutes: Math.max(1, Math.round(timePerSectionMinutes)),
     questionsPerTest: safeQuestionCount,
     questionsPerSection: safeQuestionCount,
-    dummyQuestionsPerSection: Math.max(
-      0,
-      Math.round(dummyQuestionsPerSection),
-    ),
   };
 
   writeJson(JOBS_STORAGE_KEY, [job, ...readJobAssessments()]);
@@ -537,7 +523,6 @@ export function updateJobAssessmentConfig(
     | "timePerSectionMinutes"
     | "questionsPerTest"
     | "questionsPerSection"
-    | "dummyQuestionsPerSection"
   >,
 ) {
   const jobs = readJobAssessments().map((job) => {
@@ -569,10 +554,6 @@ export function updateJobAssessmentConfig(
       ),
       questionsPerTest: questionsPerSection,
       questionsPerSection,
-      dummyQuestionsPerSection: Math.max(
-        0,
-        Math.round(updates.dummyQuestionsPerSection),
-      ),
     };
   });
 
@@ -626,25 +607,6 @@ export function saveSectionQuestionTypeConfigs(
   );
 
   writeJson(JOBS_STORAGE_KEY, jobs);
-}
-
-export function createCandidate(name: string, email: string, jobId: string) {
-  const candidate: Candidate = {
-    id: createId("candidate"),
-    name,
-    email,
-    jobId,
-    otpCode: createOtpCode(),
-    cvUrl: "https://drive.google.com/file/d/sample-cv-preview/view",
-    invitedAt: new Date().toISOString(),
-    inviteExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    isInviteExpired: false,
-    inviteEmailStatus: "pending",
-  };
-
-  writeJson(CANDIDATES_STORAGE_KEY, [candidate, ...readCandidates()]);
-  writeActiveJobAssessment(jobId);
-  return candidate;
 }
 
 export async function createCandidateRecord(
@@ -731,9 +693,9 @@ export async function updateCandidateInviteEmailStatusRecord(
 }
 
 export function createViolation(sectionSlug: string, reason: string) {
-  const section =
-    readActiveAssessmentSections().find((item) => item.slug === sectionSlug) ??
-    assessmentSections.find((item) => item.slug === sectionSlug);
+  const section = readActiveAssessmentSections().find(
+    (item) => item.slug === sectionSlug,
+  );
   const violation: AssessmentViolation = {
     id: createId("violation"),
     sectionSlug,
@@ -791,7 +753,6 @@ export async function saveAssessmentResult({
   answers: AssessmentAnswers;
   status: AssessmentResult["status"];
 }) {
-  const jobs = readJobAssessments();
   const candidates = readCandidates();
   const sections = readActiveAssessmentSections();
   const totalQuestions = sections.reduce(
@@ -802,7 +763,7 @@ export async function saveAssessmentResult({
     .flatMap((section) => section.questions.map((question) => question.id))
     .filter((id) => answers[id]?.trim()).length;
   const score = calculateAssessmentScore(sections, answers);
-  const assessment = readActiveJobAssessment() ?? jobs[0];
+  const assessment = readActiveJobAssessment();
   if (!assessment) {
     throw new Error("No active assessment is available for submission.");
   }
@@ -815,19 +776,18 @@ export async function saveAssessmentResult({
       (item) =>
         item.id === activeCandidateId &&
         (item.jobId === assessment.id || item.assessmentIds?.includes(assessment.id)),
-    ) ??
-    candidates.find((item) => item.jobId === assessment.id && !item.submittedAt) ?? {
-    name: "Preview Candidate",
-    email: "candidate@example.com",
-  };
-  if ("id" in candidate && isExpired(candidate.inviteExpiresAt)) {
+    );
+  if (!candidate) {
+    throw new Error("No active candidate assignment is available for submission.");
+  }
+  if (isExpired(candidate.inviteExpiresAt)) {
     throw new Error("This assessment invitation has expired. You can no longer start, continue, or submit it.");
   }
   const submittedAt = new Date().toISOString();
   const result: AssessmentResult = {
     id: createId("result"),
     assessmentId: assessment.id,
-    ...("id" in candidate ? { candidateId: candidate.id } : {}),
+    candidateId: candidate.id,
     assessmentTitle: assessment.title,
     candidateName: candidate.name,
     candidateEmail: candidate.email,
@@ -841,50 +801,46 @@ export async function saveAssessmentResult({
   };
 
   let savedResult = result;
-  if ("id" in candidate) {
-    const response = await fetch("/api/candidate/submissions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        candidateId: candidate.id,
-        assessmentId: assessment.id,
-        assessmentTitle: assessment.title,
-        answers: result.answers,
-        answeredCount,
-        totalQuestions,
-        score,
-        status,
-        violations: result.violations,
-      }),
-    });
-    const payload = (await response.json()) as {
-      message?: string;
-      submission?: AssessmentResult;
-    };
+  const response = await fetch("/api/candidate/submissions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      candidateId: candidate.id,
+      assessmentId: assessment.id,
+      assessmentTitle: assessment.title,
+      answers: result.answers,
+      answeredCount,
+      totalQuestions,
+      score,
+      status,
+      violations: result.violations,
+    }),
+  });
+  const payload = (await response.json()) as {
+    message?: string;
+    submission?: AssessmentResult;
+  };
 
-    if (!response.ok || !payload.submission) {
-      throw new Error(payload.message ?? "Submission could not be saved.");
-    }
-
-    savedResult = payload.submission;
+  if (!response.ok || !payload.submission) {
+    throw new Error(payload.message ?? "Submission could not be saved.");
   }
 
-  if ("id" in candidate) {
-    const previousResults = readAssessmentResults();
-    const nextResults = previousResults.some((item) => item.id === savedResult.id)
-      ? previousResults.map((item) => (item.id === savedResult.id ? savedResult : item))
-      : [savedResult, ...previousResults];
-    writeJson(RESULTS_STORAGE_KEY, nextResults);
-    writeJson(
-      CANDIDATES_STORAGE_KEY,
-      candidates.map((item) =>
-        item.id === candidate.id
-          ? { ...item, submittedAt }
-          : item,
-      ),
-    );
+  savedResult = payload.submission;
 
-  }
+  const previousResults = readAssessmentResults();
+  const nextResults = previousResults.some((item) => item.id === savedResult.id)
+    ? previousResults.map((item) => (item.id === savedResult.id ? savedResult : item))
+    : [savedResult, ...previousResults];
+  writeJson(RESULTS_STORAGE_KEY, nextResults);
+  writeJson(
+    CANDIDATES_STORAGE_KEY,
+    candidates.map((item) =>
+      item.id === candidate.id
+        ? { ...item, submittedAt }
+        : item,
+    ),
+  );
+
   clearAssessmentViolations();
   clearCandidateAssessmentRuntime(sections);
   clearCandidateBrowserData();
