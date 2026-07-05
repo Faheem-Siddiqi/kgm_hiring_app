@@ -423,7 +423,7 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
                     ))}
                     {!paginatedAssignedJobs.length ? (
                       <tr>
-                        <td colSpan={5} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
                           {assessment.assignedJobs.length
                             ? "No assigned jobs match your search."
                             : "This assessment is not assigned to any job yet."}
@@ -435,35 +435,33 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
               </div>
             </div>
 
-            {filteredAssignedJobs.length > ASSIGNED_JOBS_PER_PAGE ? (
-              <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-muted-foreground">
-                  Page {currentAssignedJobPage} of {totalAssignedJobPages} - {filteredAssignedJobs.length} assigned jobs
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={currentAssignedJobPage <= 1}
-                    onClick={() => setAssignedJobPage((page) => Math.max(1, page - 1))}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={currentAssignedJobPage >= totalAssignedJobPages}
-                    onClick={() =>
-                      setAssignedJobPage((page) => Math.min(totalAssignedJobPages, page + 1))
-                    }
-                  >
-                    Next
-                  </Button>
-                </div>
+            <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Page {currentAssignedJobPage} of {totalAssignedJobPages} - {filteredAssignedJobs.length} assigned jobs
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={currentAssignedJobPage <= 1}
+                  onClick={() => setAssignedJobPage((page) => Math.max(1, page - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={currentAssignedJobPage >= totalAssignedJobPages}
+                  onClick={() =>
+                    setAssignedJobPage((page) => Math.min(totalAssignedJobPages, page + 1))
+                  }
+                >
+                  Next
+                </Button>
               </div>
-            ) : null}
+            </div>
           </CardContent>
         </Card>
       </section>

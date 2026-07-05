@@ -8,7 +8,6 @@ import {
   Files,
   Search,
   Send,
-  Menu,
   ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
@@ -29,6 +28,8 @@ import {
   fetchAdminDataSnapshot,
   type AssessmentResult,
 } from "@/features/test/admin-storage";
+
+const SUBMISSIONS_PER_PAGE = 6;
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -82,6 +83,7 @@ export function AdminSubmissions() {
   const [submissions, setSubmissions] = useState<AssessmentResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [submissionPage, setSubmissionPage] = useState(1);
   const [shareEmails, setShareEmails] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -89,7 +91,7 @@ export function AdminSubmissions() {
 
     async function loadSubmissions() {
       try {
-        const data = await fetchAdminDataSnapshot();
+        const data = await fetchAdminDataSnapshot({ view: "analytics" });
         if (active) setSubmissions(data.results);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Could not load submissions.");
@@ -133,6 +135,15 @@ export function AdminSubmissions() {
           submissions.length,
       )
     : 0;
+  const totalSubmissionPages = Math.max(
+    1,
+    Math.ceil(filteredSubmissions.length / SUBMISSIONS_PER_PAGE),
+  );
+  const currentSubmissionPage = Math.min(submissionPage, totalSubmissionPages);
+  const paginatedSubmissions = filteredSubmissions.slice(
+    (currentSubmissionPage - 1) * SUBMISSIONS_PER_PAGE,
+    currentSubmissionPage * SUBMISSIONS_PER_PAGE,
+  );
 
   function updateShareEmail(submissionId: string, value: string) {
     setShareEmails((current) => ({ ...current, [submissionId]: value }));
@@ -204,14 +215,17 @@ export function AdminSubmissions() {
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setSubmissionPage(1);
+                }}
                 className="pl-9"
                 placeholder="Search candidate, email, assessment, status"
               />
             </div>
           </CardHeader>
-          <CardContent className="space-y-3 p-4 sm:p-5">
-            {filteredSubmissions.map((submission) => {
+          <CardContent className="flex min-h-[520px] flex-col space-y-3 p-4 sm:p-5">
+            {paginatedSubmissions.map((submission) => {
               const reviewStatus = getReviewStatus(submission);
 
               return (
@@ -306,6 +320,34 @@ export function AdminSubmissions() {
                 No submissions found.
               </div>
             ) : null}
+
+            <div className="mt-auto flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Page {currentSubmissionPage} of {totalSubmissionPages} - {filteredSubmissions.length} submissions
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={currentSubmissionPage <= 1}
+                  onClick={() => setSubmissionPage((page) => Math.max(1, page - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={currentSubmissionPage >= totalSubmissionPages}
+                  onClick={() =>
+                    setSubmissionPage((page) => Math.min(totalSubmissionPages, page + 1))
+                  }
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </section>

@@ -67,7 +67,7 @@ function useAdminData() {
     () => "{}",
   );
   const loadData = useCallback(async () => {
-    const snapshot = await fetchAdminDataSnapshot();
+    const snapshot = await fetchAdminDataSnapshot({ view: "analytics" });
     setData({ candidates: snapshot.candidates, results: snapshot.results });
     setIsLoading(false);
   }, []);
@@ -77,7 +77,7 @@ function useAdminData() {
 
     async function loadInitialData() {
       try {
-        const snapshot = await fetchAdminDataSnapshot();
+        const snapshot = await fetchAdminDataSnapshot({ view: "analytics" });
         if (active) {
           setData({ candidates: snapshot.candidates, results: snapshot.results });
           setIsLoading(false);

@@ -47,7 +47,7 @@ function useAdminData() {
 
     async function loadData() {
       try {
-        const data = await fetchAdminDataSnapshot();
+        const data = await fetchAdminDataSnapshot({ view: "analytics" });
         if (active) setAdminData({ candidates: data.candidates, results: data.results });
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Could not load notifications.");

@@ -215,8 +215,17 @@ async function ensureIndexes(database: Db) {
         .collection<CandidateDocument>("assessmentCandidates")
         .createIndex({ inviteExpiresAt: 1, submittedAt: 1 }),
       database
+        .collection<CandidateDocument>("assessmentCandidates")
+        .createIndex({ invitedAt: -1 }),
+      database
         .collection<SubmissionDocument>("assessmentSubmissions")
         .createIndex({ assessmentId: 1, submittedAt: -1 }),
+      database
+        .collection<SubmissionDocument>("assessmentSubmissions")
+        .createIndex({ submittedAt: -1 }),
+      database
+        .collection<SubmissionDocument>("assessmentSubmissions")
+        .createIndex({ assessmentId: 1, score: 1 }),
       attempts.createIndex({ candidateId: 1, assessmentId: 1 }, { unique: true }),
       submissions.dropIndex("candidateId_1").catch(() => undefined),
     ])
@@ -870,9 +879,76 @@ export async function listHiringRecords() {
   };
 }
 
+export async function listHiringAnalyticsRecords() {
+  const { candidates, submissions } = await getCollections();
+  const [candidateRecords, submissionRecords] = await Promise.all([
+    candidates
+      .find(
+        {},
+        {
+          projection: {
+            name: 1,
+            email: 1,
+            assessmentId: 1,
+            jobId: 1,
+            jobTitle: 1,
+            assessmentIds: 1,
+            otpCode: 1,
+            cvUrl: 1,
+            invitedAt: 1,
+            inviteExpiresAt: 1,
+            inviteEmailStatus: 1,
+            inviteEmailFailure: 1,
+            submittedAt: 1,
+          },
+        },
+      )
+      .sort({ invitedAt: -1 })
+      .limit(500)
+      .toArray(),
+    submissions
+      .find(
+        {},
+        {
+          projection: {
+            assessmentId: 1,
+            assessmentTitle: 1,
+            candidateId: 1,
+            candidateName: 1,
+            candidateEmail: 1,
+            submittedAt: 1,
+            answeredCount: 1,
+            totalQuestions: 1,
+            score: 1,
+            status: 1,
+            violations: 1,
+            evaluatedAt: 1,
+            evaluatedBy: 1,
+            decision: 1,
+          },
+        },
+      )
+      .sort({ submittedAt: -1 })
+      .limit(500)
+      .toArray(),
+  ]);
+
+  return {
+    candidates: candidateRecords.map(toPublicCandidate),
+    results: submissionRecords.map(toPublicSubmission),
+  };
+}
+
 export async function getHiringDashboardStats() {
   const { candidates, submissions } = await getCollections();
-  const [candidateStats, submissionStats, totals, recentInviteRecords] = await Promise.all([
+  const [
+    candidateStats,
+    submissionFacets,
+    jobInviteStats,
+    jobSubmissionStats,
+    jobScoreBuckets,
+    recentInviteRecords,
+  ] = await Promise.all([
     candidates
       .aggregate<{ _id: ObjectId; count: number }>([
         {
@@ -887,33 +963,334 @@ export async function getHiringDashboardStats() {
       ])
       .toArray(),
     submissions
-      .aggregate<{ _id: ObjectId; count: number; averageScore: number }>([
+      .aggregate<{
+        assessmentStats: Array<{ _id: ObjectId; count: number; averageScore: number }>;
+        totals: Array<{ _id: null; count: number; averageScore: number }>;
+        scoreBuckets: Array<{ _id: string; count: number }>;
+        reviewStats: Array<{ _id: null; pendingReview: number; autoSubmitted: number; totalViolations: number }>;
+      }>([
+        {
+          $facet: {
+            assessmentStats: [
+              {
+                $group: {
+                  _id: "$assessmentId",
+                  count: { $sum: 1 },
+                  averageScore: { $avg: "$score" },
+                },
+              },
+            ],
+            totals: [
+              {
+                $group: {
+                  _id: null,
+                  count: { $sum: 1 },
+                  averageScore: { $avg: "$score" },
+                },
+              },
+            ],
+            scoreBuckets: [
+              {
+                $bucket: {
+                  groupBy: "$score",
+                  boundaries: [0, 40, 60, 80, 101],
+                  default: "other",
+                  output: { count: { $sum: 1 } },
+                },
+              },
+              {
+                $project: {
+                  count: 1,
+                  label: {
+                    $switch: {
+                      branches: [
+                        { case: { $eq: ["$_id", 0] }, then: "0-39" },
+                        { case: { $eq: ["$_id", 40] }, then: "40-59" },
+                        { case: { $eq: ["$_id", 60] }, then: "60-79" },
+                        { case: { $eq: ["$_id", 80] }, then: "80-100" },
+                      ],
+                      default: "other",
+                    },
+                  },
+                },
+              },
+              { $group: { _id: "$label", count: { $sum: "$count" } } },
+            ],
+            reviewStats: [
+              {
+                $group: {
+                  _id: null,
+                  pendingReview: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $not: ["$decision"] },
+                            { $not: ["$evaluatedAt"] },
+                          ],
+                        },
+                        1,
+                        0,
+                      ],
+                    },
+                  },
+                  autoSubmitted: {
+                    $sum: { $cond: [{ $eq: ["$status", "Auto submitted"] }, 1, 0] },
+                  },
+                  totalViolations: {
+                    $sum: { $size: { $ifNull: ["$violations", []] } },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ])
+      .toArray(),
+    candidates
+      .aggregate<{
+        _id: ObjectId;
+        invited: number;
+        expectedSubmissions: number;
+        completedInvites: number;
+        activeInvites: number;
+        expiredInvites: number;
+      }>([
+        { $match: { jobId: { $exists: true } } },
+        {
+          $project: {
+            jobId: 1,
+            submittedAt: 1,
+            assessmentIds: { $ifNull: ["$assessmentIds", ["$assessmentId"]] },
+            inviteExpiresAt: {
+              $ifNull: [
+                "$inviteExpiresAt",
+                {
+                  $dateAdd: {
+                    startDate: "$invitedAt",
+                    unit: "day",
+                    amount: DEFAULT_INVITE_EXPIRY_DAYS,
+                  },
+                },
+              ],
+            },
+          },
+        },
         {
           $group: {
-            _id: "$assessmentId",
-            count: { $sum: 1 },
-            averageScore: { $avg: "$score" },
+            _id: "$jobId",
+            invited: { $sum: 1 },
+            expectedSubmissions: { $sum: { $size: "$assessmentIds" } },
+            completedInvites: {
+              $sum: { $cond: [{ $ifNull: ["$submittedAt", false] }, 1, 0] },
+            },
+            activeInvites: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $not: [{ $ifNull: ["$submittedAt", false] }] },
+                      { $gt: ["$inviteExpiresAt", "$$NOW"] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            expiredInvites: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $not: [{ $ifNull: ["$submittedAt", false] }] },
+                      { $lte: ["$inviteExpiresAt", "$$NOW"] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
           },
         },
       ])
       .toArray(),
     submissions
-      .aggregate<{ _id: null; count: number; averageScore: number }>([
+      .aggregate<{
+        _id: ObjectId;
+        submissions: number;
+        averageScore: number;
+        pendingReview: number;
+        autoSubmitted: number;
+        totalViolations: number;
+      }>([
+        {
+          $lookup: {
+            from: "assessmentCandidates",
+            localField: "candidateId",
+            foreignField: "_id",
+            as: "candidate",
+          },
+        },
+        { $unwind: "$candidate" },
+        { $match: { "candidate.jobId": { $exists: true } } },
         {
           $group: {
-            _id: null,
-            count: { $sum: 1 },
+            _id: "$candidate.jobId",
+            submissions: { $sum: 1 },
             averageScore: { $avg: "$score" },
+            pendingReview: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $not: ["$decision"] },
+                      { $not: ["$evaluatedAt"] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            autoSubmitted: {
+              $sum: { $cond: [{ $eq: ["$status", "Auto submitted"] }, 1, 0] },
+            },
+            totalViolations: {
+              $sum: { $size: { $ifNull: ["$violations", []] } },
+            },
           },
         },
       ])
       .toArray(),
-    candidates.find().sort({ invitedAt: -1 }).limit(8).toArray(),
+    submissions
+      .aggregate<{ _id: { jobId: ObjectId; bucket: string }; count: number }>([
+        {
+          $lookup: {
+            from: "assessmentCandidates",
+            localField: "candidateId",
+            foreignField: "_id",
+            as: "candidate",
+          },
+        },
+        { $unwind: "$candidate" },
+        { $match: { "candidate.jobId": { $exists: true } } },
+        {
+          $project: {
+            jobId: "$candidate.jobId",
+            bucket: {
+              $switch: {
+                branches: [
+                  { case: { $lt: ["$score", 40] }, then: "0-39" },
+                  { case: { $lt: ["$score", 60] }, then: "40-59" },
+                  { case: { $lt: ["$score", 80] }, then: "60-79" },
+                ],
+                default: "80-100",
+              },
+            },
+          },
+        },
+        {
+          $group: {
+            _id: { jobId: "$jobId", bucket: "$bucket" },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray(),
+    candidates
+      .find(
+        {},
+        {
+          projection: {
+            name: 1,
+            email: 1,
+            assessmentId: 1,
+            jobId: 1,
+            jobTitle: 1,
+            assessmentIds: 1,
+            otpCode: 1,
+            cvUrl: 1,
+            invitedAt: 1,
+            inviteExpiresAt: 1,
+            inviteEmailStatus: 1,
+            inviteEmailFailure: 1,
+            submittedAt: 1,
+          },
+        },
+      )
+      .sort({ invitedAt: -1 })
+      .limit(8)
+      .toArray(),
   ]);
+  const submissionStats = submissionFacets[0]?.assessmentStats ?? [];
+  const totals = submissionFacets[0]?.totals ?? [];
+  const reviewStats = submissionFacets[0]?.reviewStats[0];
+  const jobSubmissionStatsById = new Map(
+    jobSubmissionStats.map((item) => [item._id.toString(), item]),
+  );
+  const jobScoreBucketsById = new Map<string, Record<string, number>>();
+
+  for (const item of jobScoreBuckets) {
+    const jobId = item._id.jobId.toString();
+    const buckets = jobScoreBucketsById.get(jobId) ?? {};
+    buckets[item._id.bucket] = item.count;
+    jobScoreBucketsById.set(jobId, buckets);
+  }
 
   return {
     submissions: totals[0]?.count ?? 0,
     averageScore: Math.round(totals[0]?.averageScore ?? 0),
+    scoreBuckets: Object.fromEntries(
+      (submissionFacets[0]?.scoreBuckets ?? []).map((item) => [item._id, item.count]),
+    ) as Record<string, number>,
+    pendingReview: reviewStats?.pendingReview ?? 0,
+    autoSubmitted: reviewStats?.autoSubmitted ?? 0,
+    totalViolations: reviewStats?.totalViolations ?? 0,
+    jobStats: Object.fromEntries(
+      jobInviteStats.map((item) => {
+        const jobId = item._id.toString();
+        const submission = jobSubmissionStatsById.get(jobId);
+        const submissions = submission?.submissions ?? 0;
+
+        return [
+          jobId,
+          {
+            invited: item.invited,
+            expectedSubmissions: item.expectedSubmissions,
+            submissions,
+            completedInvites: item.completedInvites,
+            activeInvites: item.activeInvites,
+            expiredInvites: item.expiredInvites,
+            completionRate: item.expectedSubmissions
+              ? Math.round((submissions / item.expectedSubmissions) * 100)
+              : 0,
+            averageScore: Math.round(submission?.averageScore ?? 0),
+            pendingReview: submission?.pendingReview ?? 0,
+            autoSubmitted: submission?.autoSubmitted ?? 0,
+            totalViolations: submission?.totalViolations ?? 0,
+            scoreBuckets: jobScoreBucketsById.get(jobId) ?? {},
+          },
+        ];
+      }),
+    ) as Record<
+      string,
+      {
+        invited: number;
+        expectedSubmissions: number;
+        submissions: number;
+        completedInvites: number;
+        activeInvites: number;
+        expiredInvites: number;
+        completionRate: number;
+        averageScore: number;
+        pendingReview: number;
+        autoSubmitted: number;
+        totalViolations: number;
+        scoreBuckets: Record<string, number>;
+      }
+    >,
     assessments: Object.fromEntries(
       candidateStats.map((item) => [
         item._id.toString(),

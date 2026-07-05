@@ -447,13 +447,8 @@ export function TestOverview() {
 
                 <CardTitle>Important instructions</CardTitle>
                 <CardDescription className=" leading-6">
-                  Keep the test window open and in fullscreen. Active question
-                  and section timers continue during refresh, disconnect, tab
-                  close, or power loss, so a 5 minute outage consumes 5 minutes
-                  from the active timers. If you skip a question, that question
-                  timer pauses and resumes from the saved remaining time when
-                  you reopen it. Submitted or timed-out questions cannot be
-                  edited.
+                  Stay in fullscreen and keep the test window open during the assessment. Timers continue once a question or section is active. Skipped questions can be reopened only if time is still available.
+
                 </CardDescription>
               </div>
             </CardHeader>

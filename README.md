@@ -1,17 +1,43 @@
 # KGM Hiring Portal
 
-A Next.js 16 hiring portal with separate candidate and hiring-team experiences. Candidates enter an invitation OTP, complete a timed fullscreen assessment, and submit their answers. Hiring-team users sign in to create assessments, invite candidates, and review results.
+KGM Hiring Portal is a Next.js 16 hiring and assessment system for job postings, assessment setup, candidate invitations, timed candidate attempts, and hiring-team review.
+
+The application has two separate experiences:
+
+- Candidate flow: OTP verification, assessment overview, timed section runner, autosaved attempt state, and final submission.
+- Admin flow: protected hiring workspace for assessments, jobs, invites, submissions, users, settings, analytics, and review decisions.
+
+## Tech Stack
+
+- Next.js 16 App Router
+- React 19
+- TypeScript
+- MongoDB Node driver
+- Tailwind CSS 4
+- Nodemailer for invitation, reset, and admin email flows
+- shadcn-style local UI primitives in `components/ui`
 
 ## Getting Started
 
-Install dependencies and start the development server:
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Create `.env.local` from `.env.example` and fill the values listed in [Environment Variables](#environment-variables).
+
+Start development:
+
+```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open:
+
+```text
+http://localhost:3000
+```
 
 Useful commands:
 
@@ -22,219 +48,367 @@ npm run build
 npm run start
 ```
 
-## Page Routes
-
-### `/` - Candidate Portal
-
-**Route file:** `app/page.tsx`
-
-**View:** `OtpLoginForm` in `features/auth/components/otp-login-form.tsx`
-
-**Access:** Public
-
-This is the candidate sign-in page.
-
-- Accepts a six-digit assessment access code.
-- Rejects codes that are malformed, invalid, or expired.
-- Matches the code against candidate invitations stored by the hiring workspace.
-- Stores the active candidate and candidate-authenticated state in browser `localStorage`.
-- Shows success or error notifications.
-- Redirects a valid candidate to `/assessment`.
-- Provides a link to the hiring-team login at `/admin/login`.
-
-### `/assessment` - Assessment Overview
-
-**Route file:** `app/assessment/page.tsx`
-
-**View:** `TestOverview` in `features/test/components/test-overview.tsx`
-
-**Access:** Candidate flow
-
-This page summarizes the active assessment before and between sections.
-
-- Shows the assessment title, role, section count, question count, and total allowed time.
-- Lists every configured assessment section with its title, duration, question count, and completion progress.
-- Starts or continues a section and requests fullscreen before opening it.
-- Reads the active assessment and its generated sections from browser storage.
-- Reads saved answers so progress survives route changes and refreshes.
-- Allows a completed assessment to be reviewed and submitted.
-- Displays a submission confirmation when the full assessment is complete.
-
-### `/assessment/[section]` - Assessment Section
-
-**Route file:** `app/assessment/[section]/page.tsx`
-
-**Loading view:** `app/assessment/[section]/loading.tsx`
-
-**View:** `SectionRunner` in `features/test/components/section-runner.tsx`
-
-**Access:** Candidate flow
-
-**Examples:** `/assessment/english`, `/assessment/general`, `/assessment/admin-mcqs`
-
-This dynamic route runs one assessment section. The built-in section slugs are generated as static parameters, while the view resolves the active assessment configuration from browser storage.
-
-- Presents one question at a time with text, single-choice, or multiple-choice inputs.
-- Saves answers in `localStorage` and restores them after navigation or refresh.
-- Displays question navigation, answered/skipped state, section progress, and previous/next controls.
-- Enforces both a section timer and configured per-question timers.
-- Persists timer deadlines in `sessionStorage` so refreshing does not restart time.
-- Allows candidates to skip questions and revisit available questions.
-- Requires an answer before final submission from the last question.
-- Opens the next section or returns to the overview when appropriate.
-- Shows a time-up dialog when the section timer expires, with overview and reset controls.
-- Requires fullscreen and monitors tab visibility, fullscreen exit, and window focus loss.
-- Records each enforcement violation in browser storage and displays a blocking warning.
-- Automatically submits and terminates the assessment on the third violation.
-- Calculates and stores the final result for hiring-team review.
-- Shows a completion dialog for normal and automatic submissions.
-
-If a section is being prepared, the route-level loading view displays skeleton placeholders for the section header, timer, navigation, and question card.
-
-### `/admin/login` - Hiring Workspace Login
-
-**Route file:** `app/admin/login/page.tsx`
-
-**View:** `AdminLoginForm` in `features/auth/components/admin-login-form.tsx`
-
-**Access:** Public only when signed out
-
-This is the hiring-team sign-in page.
-
-- Accepts the configured admin email and password.
-- Sends credentials to `POST /api/admin/session`.
-- Shows server-provided authentication errors.
-- Redirects successful sign-ins to `/admin` and refreshes the route state.
-- Provides a link back to the candidate portal.
-- Redirects already authenticated admins to `/admin` through `proxy.ts`.
-
-### `/admin` - Hiring Workspace Dashboard
-
-**Route file:** `app/admin/page.tsx`
-
-**View:** `AdminDashboard` in `features/test/components/admin-dashboard.tsx`
-
-**Access:** Protected by the admin session cookie
-
-This is the main hiring-team workspace.
-
-- Displays pipeline totals for assessments, candidates, submissions, and average score.
-- Creates role-specific assessments from the available JSON question banks.
-- Configures section count, questions per section, section time, and question time.
-- Validates that the selected question bank can satisfy the requested assessment size.
-- Creates candidate invitations for a selected assessment.
-- Generates a six-digit OTP and prepares an email invite.
-- Displays and copies the most recently generated OTP.
-- Lists assessments with invited, completed, and average-score statistics.
-- Opens an assessment-specific analytics page at `/admin/[assessmentId]`.
-- Shows recent submissions and their scores.
-- Builds notifications for submissions, pending invitations, and available assessments.
-- Supports individual and bulk notification read state.
-- Provides responsive desktop and mobile workspace navigation.
-- Signs out through `DELETE /api/admin/session` and returns to `/admin/login`.
-
-Assessment, invitation, result, and notification data is currently stored in browser `localStorage`.
-
-### `/admin/[assessmentId]` - Assessment Analytics
-
-**Route file:** `app/admin/[assessmentId]/page.tsx`
-
-**View:** `AssessmentAnalytics` in `features/test/components/assessment-analytics.tsx`
-
-**Access:** Protected by the admin session cookie
-
-**Example:** `/admin/assistant-admin-officer`
-
-This dynamic route provides detailed management and review for one assessment.
-
-- Shows invited, completed, average-score, and auto-submitted metrics.
-- Visualizes score distribution across four score bands.
-- Ranks and displays the top five candidates.
-- Creates an invitation directly for the current assessment.
-- Edits per-section question-type settings using draft values with explicit Save and Cancel actions.
-- Lists candidates with OTP, invitation date, result state, and CV actions.
-- Opens available CV links in an embedded preview panel.
-- Shows a submission log with status, score, date, and violation count.
-- Opens a selected submission for question-by-question review.
-- Displays candidate answers alongside expected answers and grading outcomes.
-- Shows an "Assessment not found" card with a dashboard return action when the ID does not exist.
-
-## API Routes
-
-### `/api/admin/session`
-
-**Route file:** `app/api/admin/session/route.ts`
-
-#### `POST`
-
-Authenticates a hiring-team user.
-
-- Expects JSON containing `email` and `password`.
-- Compares credentials with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
-- Returns `401` with an error message for invalid credentials.
-- Creates an HTTP-only, same-site admin session cookie valid for eight hours after successful authentication.
-
-#### `DELETE`
-
-Signs out the hiring-team user by deleting the admin session cookie.
-
-## Route Protection
-
-`proxy.ts` applies to `/admin/:path*`.
-
-- Signed-out visitors requesting an admin page are redirected to `/admin/login`.
-- Signed-in visitors requesting `/admin/login` are redirected to `/admin`.
-- Candidate routes and the candidate portal are not covered by the admin cookie.
-
 ## Environment Variables
 
-Configure the hiring-team credentials in `.env.local`:
+Use `.env.local` for local secrets. Keep real credentials out of committed files.
 
 ```env
+MAIN_ADMIN_NAME=Faheem Siddiqi
+MAIN_ADMIN_DESIGNATION=IT Administrator
 ADMIN_EMAIL=admin@kgm.com
-ADMIN_PASSWORD=replace-with-a-secure-password
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=KgmCluster
+ADMIN_PASSWORD=replace-with-a-strong-password
+
+APP_BASE_URL=http://localhost:3000
+
+ADMIN_MAIL_HOST=smtp.gmail.com
+ADMIN_MAIL_PORT=587
+ADMIN_MAIL_SECURE=false
+ADMIN_MAIL_USER=your-email@gmail.com
+ADMIN_MAIL_PASSWORD=your-google-app-password
+ADMIN_MAIL_FROM=KGM Hiring <your-email@gmail.com>
+ADMIN_MAIL_TEST_TO=test-recipient@example.com
+
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
 MONGODB_DB=kgm_hiring
 DEV_MODE=true
 ```
 
-When these variables are absent, development fallbacks from the session route are used. Production deployments should always provide secure values.
+### Environment Notes
 
-## Centralized Error Diagnostics
+- `ADMIN_EMAIL` and `ADMIN_PASSWORD` seed the primary admin login when the admin collection is initialized.
+- `APP_BASE_URL` is required for admin invitations, password reset links, and candidate invite links.
+- `ADMIN_MAIL_*` values enable SMTP delivery. If they are absent, invite records are still created and the UI keeps a manual OTP fallback.
+- `MONGODB_URI` and `MONGODB_DB` are required for server data.
+- `DEV_MODE=true` enables richer diagnostics and should not be used in production.
 
-The application includes centralized diagnostics for server, API, MongoDB, browser, network, promise, and React rendering errors.
+## Product Flow
 
-- `lib/server-error.ts` normalizes server errors, assigns correlation IDs, records timestamps, preserves nested cause chains, and generates consistent API error responses.
-- `instrumentation.ts` captures MongoDB startup failures and errors handled by the Next.js server runtime.
-- `instrumentation-client.ts` reports uncaught browser errors, unhandled promise rejections, failed network requests, non-successful API responses, and route transitions in the browser console.
-- When `DEV_MODE=true`, recoverable errors also open a detailed in-browser modal with navigation between recent errors, copyable diagnostics, context, cause chains, stack traces, and a **Close and continue** action.
-- A development-only diagnostics endpoint streams buffered startup, database, request, and background server errors into that modal, including failures that otherwise appear only in the IDE terminal.
-- `app/error.tsx` and `app/global-error.tsx` provide consistent recovery screens for route and root-layout rendering failures.
-- API failures include an error ID that can be matched with the corresponding `[error:<id>]` entry in the server console.
+1. Admin signs in at `/admin/login`.
+2. Admin creates or edits assessments from JSON-backed question banks at `/admin/assessments`.
+3. Admin creates jobs at `/admin/jobs` and attaches one assessment to each job in the current UI.
+4. Admin opens a job detail page and invites a candidate.
+5. The server stores a job-level candidate assignment with concrete assessment IDs and a unique OTP.
+6. Email delivery is attempted through SMTP. If email fails or SMTP is not configured, the invite still exists and privileged admins can use the manual OTP fallback.
+7. Candidate opens `/assessment/verify` or uses an invite link with `?otp=...`.
+8. Candidate sees all pending assessments attached to the job invite and can complete them one by one.
+9. Starting or resuming an assessment creates or loads a server attempt record.
+10. Progress, answers, current section/question, timers, and violations are saved through candidate attempt APIs.
+11. Candidate can submit at any point with confirmation.
+12. Submission creates a reviewable record. The job invite is marked complete only after all assigned assessments are submitted.
+13. Admin reviews submissions, evaluates written answers, and makes a terminal accepted, rejected, or forwarded decision.
 
-Set `DEV_MODE=true` locally to include detailed server diagnostics, context, cause chains, and stack traces in API responses. Open the browser developer tools and inspect the **Console** and **Network** tabs for grouped `[diagnostics]` messages.
+## Business Rules
 
-Detailed diagnostics are development-only. Production responses expose safe messages and correlation IDs while passwords, tokens, cookies, connection strings, and URI credentials are redacted from logged diagnostic data. Do not enable `DEV_MODE` in production.
+- Admin routes are protected by an HTTP-only admin session cookie.
+- Candidate access uses OTP verification through `/assessment/verify`.
+- Expired invites cannot be started, continued, or submitted.
+- Submitted assessments cannot be reopened by the candidate.
+- A job invite can contain multiple assessments; each assessment has its own attempt and submission state.
+- Repeat job attempts are separate assignments, but a new assignment is blocked while a prior assignment for the same candidate and job is still pending.
+- Active duplicate invites reuse the existing OTP instead of creating a new database record.
+- OTP values are masked by default. Main admin, HOD-designated users, and IT-designated users can view candidate OTPs.
+- Fullscreen, focus, and visibility violations are recorded. They do not terminate the assessment by default.
+- Final review decisions are terminal. The review flow is action-based and does not store mutable admin remarks.
+- The frontend currently keeps job assessment selection to one assessment unless the backend/data model is intentionally expanded.
+
+## UI Pages
+
+### Public and Candidate Pages
+
+- `/` - Public landing/candidate entry surface.
+- `/jobs` - Public job listing.
+- `/jobs/[jobId]` - Public job detail.
+- `/assessment/verify` - Secure OTP verification entrypoint.
+- `/assessment` - Candidate assessment overview.
+- `/assessment/[section]` - Timed section runner.
+
+### Admin Pages
+
+- `/admin/login` - Hiring-team sign in.
+- `/admin` - Analytics-first hiring dashboard.
+- `/admin/jobs` - Job list, create flow, and job status overview.
+- `/admin/jobs/[jobId]` - Job analytics, candidates, invite flow, score graph, and top performers.
+- `/admin/jobs/[jobId]/configure` - Dedicated job configuration route.
+- `/admin/assessments` - Assessment list and create flow.
+- `/admin/assessment/[assessmentId]` - Canonical assessment detail and section configuration.
+- `/admin/[assessmentId]` - Legacy assessment analytics route retained for compatibility.
+- `/admin/submissions` - Submission list and review entry.
+- `/admin/submissions/[submissionId]` - Full submission review with answers and scoring.
+- `/admin/notifications` - Admin notification center.
+- `/admin/settings` - Admin/user management area.
+- `/admin/setup-password` - Invitation password setup.
+- `/admin/request-access-invitation` - Admin access request.
+- `/admin/request-reset-link` - Password reset request.
+- `/admin/reset-password` - Password reset completion.
+- `/admin/auth-required` - Protected-route fallback.
+
+## API Routes
+
+### Admin APIs
+
+- `POST`, `DELETE`, `GET /api/admin/session` - Admin login, logout, and current session.
+- `GET`, `POST /api/admin/assessments` - List and create assessments.
+- `GET`, `POST`, `PATCH`, `PUT /api/admin/jobs` - List, create, status update, and edit jobs.
+- `POST`, `PATCH /api/admin/candidates` - Create candidate assignments and update invite email status.
+- `GET /api/admin/hiring-records` - Full candidate/submission snapshot.
+- `GET /api/admin/hiring-records?view=analytics` - Lean analytics snapshot for dashboards and lists.
+- `POST /api/admin/candidate-invites` - Send or resend candidate invite email.
+- `GET`, `POST /api/admin/users` - Admin user management.
+- `POST /api/admin/request-access-invitation` - Request admin access.
+- `POST /api/admin/request-reset-link` - Request password reset link.
+- `POST /api/admin/reset-password` - Complete password reset.
+- `POST /api/admin/setup-password` - Complete invited admin password setup.
+- `POST /api/admin/submission-emails` - Send submission-related email.
+- `GET`, `PATCH /api/admin/submissions/[submissionId]` - Load and review one submission.
+- `POST /api/admin/test-email` - Send test email to verify SMTP.
+
+### Candidate and Public APIs
+
+- `GET /api/jobs` - Public job listing.
+- `POST /api/candidate/otp` - Verify candidate OTP and load pending assessments.
+- `POST`, `PATCH /api/candidate/attempts` - Start/resume and autosave assessment attempt state.
+- `POST /api/candidate/submissions` - Submit candidate assessment.
+- `GET /api/database/status` - Database connectivity status.
+
+## MongoDB Schema
+
+The application creates indexes at runtime from the server helper modules. Main collections:
+
+### `admin_users`
+
+Stores hiring-team users.
+
+Important fields:
+
+- `name`, `designation`, `email`
+- `passwordHash`
+- `role`: `main-admin` or `sub-admin`
+- `isAdmin`, `canManageAdmins`, `paused`
+- `mustChangePassword`
+- `temporaryPasswordBackup`
+- `invitationExpiresAt`
+- `resetTokenHash`, `resetTokenExpiresAt`, `resetTokenPurpose`
+- `createdAt`, `updatedAt`, `lastLoginAt`
+
+Indexes:
+
+- unique `email`
+- TTL `invitationExpiresAt`
+
+### `admin_sessions`
+
+Stores admin login sessions.
+
+Important fields:
+
+- `userId`, `email`
+- `tokenHash`
+- `createdAt`, `expiresAt`
+
+Indexes:
+
+- unique `tokenHash`
+- TTL `expiresAt`
+
+### `assessments`
+
+Stores configured assessments built from resource question banks.
+
+Important fields:
+
+- `code`, `name`, `description`
+- `questionBankId`
+- `sectionSettings`
+- `createdAt`, `updatedAt`
+
+Indexes:
+
+- unique `code`
+- `questionBankId, updatedAt`
+- `updatedAt, createdAt`
+
+### `jobs`
+
+Stores public/admin job postings.
+
+Important fields:
+
+- `slug`, `title`, `department`
+- `location`, `experience`, `status`
+- `summary`, `description`
+- `responsibilities`, `requirements`, `tags`
+- `assessmentIds`
+- `createdAt`, `updatedAt`, `reopenedAt`
+
+Indexes:
+
+- unique `slug`
+- `status, updatedAt`
+- `assessmentIds`
+
+### `assessmentCandidates`
+
+Stores candidate invitations and job assignments.
+
+Important fields:
+
+- `name`, `email`
+- `assessmentId`
+- `jobId`, `jobTitle`
+- `assessmentIds`
+- `otpCode`
+- `cvUrl`
+- `invitedAt`, `inviteExpiresAt`
+- `inviteEmailStatus`, `inviteEmailFailure`
+- `submittedAt`
+
+Indexes:
+
+- unique `otpCode`
+- `assessmentId, invitedAt`
+- `jobId, invitedAt`
+- `email, jobId, submittedAt`
+- `inviteExpiresAt, submittedAt`
+- `invitedAt`
+
+### `candidateAssessmentAttempts`
+
+Stores server-backed candidate runtime state.
+
+Important fields:
+
+- `candidateId`, `assessmentId`
+- `status`
+- `startedAt`, `updatedAt`, `submittedAt`
+- `currentSectionSlug`, `currentQuestionId`
+- `answers`
+- `questionStatuses`
+- `questionRemainingSeconds`
+- `sectionDeadlines`, `questionDeadlines`
+- `violations`
+
+Indexes:
+
+- unique `candidateId, assessmentId`
+
+### `assessmentSubmissions`
+
+Stores final candidate submissions and admin review state.
+
+Important fields:
+
+- `candidateId`, `assessmentId`
+- `assessmentTitle`
+- `candidateName`, `candidateEmail`
+- `submittedAt`
+- `answeredCount`, `totalQuestions`, `score`
+- `status`
+- `violations`
+- `answers`
+- `textScores`
+- `reviews`
+- `evaluatedAt`, `evaluatedBy`
+- `decision`
+
+Indexes:
+
+- `assessmentId, submittedAt`
+- `submittedAt`
+- `assessmentId, score`
+- unique `candidateId, assessmentId`
 
 ## Data and Persistence
 
-The current application remains browser-first for hiring workflow data. MongoDB is connected and health-checked by the server infrastructure, but assessment and candidate records have not yet been migrated to it.
+Server-backed data:
 
-- `localStorage` holds assessments, candidates, OTP invitations, active candidate/assessment IDs, answers, question status, violations, results, and notification read state.
-- `sessionStorage` holds active section and question timer values.
-- The admin login uses an HTTP-only cookie and is the only server-managed session.
-- Data is specific to the browser and origin in which it was created; clearing site data removes it.
+- Admin users and sessions
+- Assessment definitions
+- Jobs
+- Candidate invites and assignment state
+- Candidate attempt state
+- Candidate submissions and reviews
+
+Browser-backed runtime mirror:
+
+- Candidate auth flags and active candidate/assessment IDs
+- Local answer mirror for fast UI rendering
+- Local attempt mirror after server autosave
+- Notification read state
+- Temporary UI state for assessment runner transitions
+
+The server is the source of truth for invite validity, expiry, submissions, attempts, review decisions, and admin authentication.
+
+## Performance and Optimization
+
+The API layer is designed to avoid broad client-side filtering for routine dashboard work.
+
+- Dashboard summary stats are produced server-side through aggregation.
+- `/api/admin/hiring-records?view=analytics` returns a lean snapshot without heavy answer/review payloads.
+- Full submission payloads are loaded only where detailed review requires answers.
+- Job listing uses an aggregation pipeline with `$lookup` and `$facet` for rows, status counts, and pagination metadata.
+- Dashboard submission totals, score buckets, pending review counts, auto-submitted counts, and violation totals are aggregated server-side.
+- Candidate and submission list reads use projections and indexed sorts.
+- Mongo indexes are created from helper modules on first use.
+- Candidate attempts use compound uniqueness so one candidate can complete multiple assessments under one job invite without duplicate submissions.
+
+## UI and Design Rules
+
+- Keep candidate and admin flows visually and technically separate.
+- Use restrained shadcn-style surfaces for admin pages.
+- Use route-level loading skeletons for admin and assessment routes.
+- Keep dashboard and job-detail analytics centered on invitation, assessment, submission, score, and review state.
+- Keep configuration flows explicit with Save/Cancel where draft values exist.
+- Show immediate feedback after create, update, invite, resend, status, and review actions.
+- Keep candidate instructions near the assessment overview header.
+- Do not expose OTPs or sensitive review data only through frontend hiding; server responses must enforce visibility.
+- Prefer professional labels over demo wording.
+- Avoid unrelated UI redesign when changing API or persistence behavior.
+
+## Route Protection
+
+`proxy.ts` protects `/admin/:path*`.
+
+- Signed-out admin visitors are redirected to `/admin/login`.
+- Signed-in admin visitors requesting `/admin/login` are redirected to `/admin`.
+- Candidate and public job routes are not protected by the admin session cookie.
+
+## Error Diagnostics
+
+The app centralizes server and browser diagnostics:
+
+- `lib/server-error.ts` normalizes server errors and API responses.
+- `instrumentation.ts` captures server/runtime startup errors.
+- `instrumentation-client.ts` reports browser, route, promise, network, and API errors.
+- `app/error.tsx` and `app/global-error.tsx` provide consistent recovery screens.
+- `DEV_MODE=true` enables detailed local diagnostics with redaction for secrets, tokens, cookies, and connection strings.
 
 ## Main Source Areas
 
 ```text
-app/                         Page routes, API route, layout, and loading UI
-features/auth/components/    Candidate and admin login views
-features/test/components/    Test overview, section runner, dashboard, analytics
-features/test/resources/     JSON assessment question banks
+app/                         App Router pages, route handlers, loading UI, errors
+components/admin/            Admin shell and navigation
+components/ui/               Local shadcn-style primitives
+db/                          MongoDB connection helper
+features/auth/components/    Candidate and admin auth views
+features/jobs/components/    Public/admin job views
+features/test/components/    Assessment overview, runner, dashboard, review UI
+features/test/resources/     JSON question banks
 features/test/admin-storage.ts
-                              Assessments, candidates, results, and violations
-features/test/assessment-storage.ts
-                              Candidate answer persistence
+                              Browser mirror and client API helpers
+lib/admin-users.ts           Admin users, sessions, roles, password/reset tokens
+lib/assessments.ts           Assessment persistence and validation
+lib/hiring-records.ts        Candidate invites, attempts, submissions, analytics
+lib/jobs.ts                  Job persistence and job list aggregation
+lib/mail/                    SMTP mail service and email builders
 proxy.ts                     Admin route protection
 ```
+
+## Deployment Checklist
+
+- Set secure `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+- Set `APP_BASE_URL` to the deployed origin.
+- Set `MONGODB_URI` and `MONGODB_DB`.
+- Configure `ADMIN_MAIL_*` for production email delivery.
+- Set `DEV_MODE=false` or omit it.
+- Run `npm run lint`.
+- Run `npm run build`.

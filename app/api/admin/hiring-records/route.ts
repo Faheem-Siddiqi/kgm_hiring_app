@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { ADMIN_SESSION_COOKIE, getAdminSessionToken } from "@/lib/admin-session";
 import { canViewCandidateInviteOtp, validateAdminSessionToken } from "@/lib/admin-users";
-import { listHiringRecords } from "@/lib/hiring-records";
+import { listHiringAnalyticsRecords, listHiringRecords } from "@/lib/hiring-records";
 import { withErrorHandler } from "@/lib/server-error";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ async function requireAdminSession() {
   return validateAdminSessionToken(getAdminSessionToken(cookieValue));
 }
 
-export const GET = withErrorHandler(async () => {
+export const GET = withErrorHandler(async (request: Request) => {
   const session = await requireAdminSession();
 
   if (!session) {
@@ -23,7 +23,10 @@ export const GET = withErrorHandler(async () => {
   }
 
   const canViewOtp = canViewCandidateInviteOtp(session.user);
-  const records = await listHiringRecords();
+  const view = new URL(request.url).searchParams.get("view");
+  const records = view === "analytics"
+    ? await listHiringAnalyticsRecords()
+    : await listHiringRecords();
 
   return NextResponse.json({
     ...records,

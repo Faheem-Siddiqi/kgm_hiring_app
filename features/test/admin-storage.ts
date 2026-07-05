@@ -226,8 +226,9 @@ function toJobAssessment(assessment: PublicAssessment): JobAssessment {
   };
 }
 
-export async function fetchAdminDataSnapshot() {
-  const response = await fetch("/api/admin/hiring-records", { cache: "no-store" });
+export async function fetchAdminDataSnapshot(options: { view?: "analytics" | "full" } = {}) {
+  const query = options.view === "analytics" ? "?view=analytics" : "";
+  const response = await fetch(`/api/admin/hiring-records${query}`, { cache: "no-store" });
   const payload = (await response.json()) as {
     message?: string;
     candidates?: Candidate[];
