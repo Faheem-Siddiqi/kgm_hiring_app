@@ -701,21 +701,26 @@ export function AdminAssessments({
           </Card>
         </div>
       </section>
-      {loadingBank ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-lg border bg-card p-5 shadow-lg">
-            <div className="space-y-4">
-              <div className="h-5 w-36 animate-pulse rounded-md bg-muted" />
-              <div className="space-y-2">
-                <div className="h-10 animate-pulse rounded-md bg-muted" />
-                <div className="h-10 animate-pulse rounded-md bg-muted" />
-                <div className="h-10 animate-pulse rounded-md bg-muted" />
-              </div>
-              <div className="h-4 w-64 max-w-full animate-pulse rounded-md bg-muted" />
-            </div>
-          </div>
+     {loadingBank ? (
+  <div className="fixed inset-0 z-50 grid place-items-center bg-background/60 p-4 backdrop-blur-sm">
+    <div className="w-full max-w-sm rounded-xl border bg-card p-5 shadow-xl">
+      <div className="flex items-start gap-4">
+        <div className="grid size-11 shrink-0 place-items-center rounded-full bg-muted">
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
         </div>
-      ) : null}
+
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">
+            Fetching assessment details
+          </p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            Please wait while sections and question settings are being updated.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+) : null}
     </main>
   );
 }

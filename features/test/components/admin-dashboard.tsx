@@ -616,7 +616,7 @@ function ChartHoverPopover({
                         </span>
                       </div>
 
-                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
                         <div
                           className="h-full rounded-full bg-foreground"
                           style={{
@@ -1779,12 +1779,16 @@ export function AdminDashboard({
                           </Badge>
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <Button asChild size="sm" variant="outline">
-                            <Link href={`/admin/jobs/${job.slug}`}>
-                              Open
-                              <ArrowRight className="size-4" />
-                            </Link>
-                          </Button>
+                       <Link
+  href={`/admin/jobs/${job.slug}`}
+  className=" mr-1 inline-flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground hover:text-black"
+>
+  <span className="relative block w-fit after:absolute after:left-0 after:bottom-0 after:block after:h-[1px] after:w-full after:origin-center after:scale-x-0 after:bg-current after:transition after:duration-300 after:content-[''] hover:after:scale-x-100">
+    Open
+  </span>
+
+
+</Link>
                         </td>
                       </tr>
                     ))}

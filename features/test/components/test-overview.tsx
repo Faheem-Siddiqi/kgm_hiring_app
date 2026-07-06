@@ -441,9 +441,7 @@ export function TestOverview() {
           <Card className="border-primary/20 bg-primary/5 shadow-none">
             <CardHeader className="gap-4 border-b bg-background/50 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0 space-y-3">
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">Expires {expiryLabel}</Badge>
-                </div>
+              
 
                 <CardTitle>Important instructions</CardTitle>
                 <CardDescription className=" leading-6">
