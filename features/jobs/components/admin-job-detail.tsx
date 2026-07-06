@@ -1122,15 +1122,14 @@ export function AdminJobDetail({
 
             <div className="flex-1 overflow-hidden rounded-md border">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px] text-sm">
+                <table className="w-full min-w-[960px] text-sm">
                   <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="px-4 py-3 font-medium">Candidate</th>
                       <th className="px-4 py-3 font-medium">Assessment</th>
                       <th className="px-4 py-3 font-medium">Invite</th>
                       <th className="px-4 py-3 font-medium">Expiry</th>
-                      <th className="px-4 py-3 font-medium">Submission</th>
-                      <th className="px-4 py-3 font-medium">Score</th>
+                      <th className="px-4 py-3 font-medium">Result</th>
                       <th className="px-4 py-3 text-right font-medium">Action</th>
                     </tr>
                   </thead>
@@ -1138,7 +1137,7 @@ export function AdminJobDetail({
                     {isLoading
                       ? Array.from({ length: 5 }).map((_, index) => (
                           <tr key={`candidate-skeleton-${index}`} className="bg-background">
-                            {Array.from({ length: 7 }).map((__, cellIndex) => (
+                            {Array.from({ length: 6 }).map((__, cellIndex) => (
                               <td key={cellIndex} className="px-4 py-4">
                                 <div className="h-4 w-full max-w-36 animate-pulse rounded bg-muted" />
                                 {cellIndex === 0 ? (
@@ -1171,7 +1170,8 @@ export function AdminJobDetail({
                         <tr key={candidate.id} className="bg-background align-top transition hover:bg-muted/30">
                           <td className="px-4 py-3">
                             <p className="font-medium">{candidate.name}</p>
-                            <p className="text-xs text-muted-foreground">{candidate.email}</p>
+                            <p className="break-all text-xs text-muted-foreground">{candidate.email}</p>
+
                             {emailFailed ? (
                               <div className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 p-3">
                                 <p className="text-xs font-medium text-destructive">
@@ -1214,12 +1214,14 @@ export function AdminJobDetail({
                               </div>
                             ) : null}
                           </td>
+
                           <td className="px-4 py-3">
-                            <p className="font-medium">{candidate.jobTitle ?? job.title}</p>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="max-w-[260px] truncate font-medium">{candidate.jobTitle ?? job.title}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
                               {candidateAssessments.map((assessment) => assessment.code).join(", ") || pendingAssessmentId}
                             </p>
                           </td>
+
                           <td className="px-4 py-3">
                             <Badge
                               variant={emailFailed ? "outline" : "secondary"}
@@ -1231,62 +1233,61 @@ export function AdminJobDetail({
                             >
                               {candidate.inviteEmailStatus ?? "sent"}
                             </Badge>
-                            <p className="mt-1 text-xs text-muted-foreground">{formatDate(candidate.invitedAt)}</p>
+                            <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
+                              {formatDate(candidate.invitedAt)}
+                            </p>
                           </td>
+
                           <td className="px-4 py-3">
                             <Badge variant={candidate.isInviteExpired ? "outline" : "secondary"}>
                               {candidate.isInviteExpired ? "Expired" : "Active"}
                             </Badge>
-                            <p className="mt-1 text-xs text-muted-foreground">
+                            <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
                               {formatDate(candidate.inviteExpiresAt)}
                             </p>
                           </td>
+
                           <td className="px-4 py-3">
                             {candidateResults.length ? (
                               <>
                                 <Badge variant="secondary">
                                   {candidateResults.length}/{candidateAssessmentIds.length} submitted
                                 </Badge>
-                                <p className="mt-1 text-xs text-muted-foreground">{formatDate(candidateResults[0].submittedAt)}</p>
+                                <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
+                                  {formatDate(candidateResults[0].submittedAt)}
+                                </p>
+                                <p className="mt-2 text-xs font-medium text-foreground">
+                                  Score: {latestResult ? `${latestResult.score ?? 0}%` : "Not Attempted"}
+                                </p>
                               </>
                             ) : (
-                              <Badge variant="outline">Waiting</Badge>
+                              <>
+                                <Badge variant="outline">Waiting</Badge>
+                                <p className="mt-2 text-xs font-medium text-foreground">Not Attempted</p>
+                              </>
                             )}
                           </td>
-                        
-                        
-                      <td className="px-4 py-3">
-  <div className="flex h-full items-center">
-    <span className="text-xs font-medium text-foreground">
-      {latestResult ? `${latestResult.score ?? 0}%` : "Not Attempted"}
-    </span>
-  </div>
-</td>
+
                           <td className="px-4 py-3 text-right">
-
-
                             <Link
-  href={latestResult ? `/admin/submissions/${latestResult.id}` : "#"}
-  onClick={(e) => {
-    if (!latestResult) e.preventDefault();
-  }}
-  aria-disabled={!latestResult}
-  className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide hover:text-black text-muted-foreground "
->
-  <span className="relative block w-fit   after:absolute after:left-0 after:bottom-0 after:block after:h-[1px] after:w-full after:origin-center after:scale-x-0 after:bg-current after:transition after:duration-300 after:content-[''] hover:after:scale-x-100">
-    {latestResult ? `View` : "Waiting"}
-  </span>
-</Link>
-
-
-                       
+                              href={latestResult ? `/admin/submissions/${latestResult.id}` : "#"}
+                              onClick={(e) => {
+                                if (!latestResult) e.preventDefault();
+                              }}
+                              aria-disabled={!latestResult}
+                              className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground hover:text-black"
+                            >
+                              <span className="relative block w-fit after:absolute after:left-0 after:bottom-0 after:block after:h-[1px] after:w-full after:origin-center after:scale-x-0 after:bg-current after:transition after:duration-300 after:content-[''] hover:after:scale-x-100">
+                                {latestResult ? `View` : "Waiting"}
+                              </span>
+                            </Link>
                           </td>
                         </tr>
                       );
                     })}
                     {!isLoading && !paginatedCandidates.length ? (
                       <tr>
-                        <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                        <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
                           {jobCandidates.length
                             ? "No candidates match your search."
                             : "Invited candidates for this job will appear here."}
