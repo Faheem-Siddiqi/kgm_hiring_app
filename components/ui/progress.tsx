@@ -1,4 +1,5 @@
 import * as React from "react";
+
 import { cn } from "@/lib/utils";
 
 function Progress({
@@ -12,7 +13,7 @@ function Progress({
     <div
       data-slot="progress"
       className={cn(
-        "relative h-2 w-full overflow-hidden rounded-full bg-secondary",
+        "relative h-1 w-full overflow-hidden rounded-full bg-secondary",
         className,
       )}
       role="progressbar"

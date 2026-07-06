@@ -729,7 +729,7 @@ function InteractiveInvitationFunnel({
                 <span className="font-medium">{stage.label}</span>
                 <span className="text-muted-foreground">{stage.value}</span>
               </div>
-              <div className="mt-3 h-3 overflow-hidden rounded-full bg-muted">
+              <div className="mt-3 h-1 overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full rounded-full bg-foreground transition-all duration-300 ease-out"
                   style={{ width: `${clampPercent(stage.percent)}%` }}

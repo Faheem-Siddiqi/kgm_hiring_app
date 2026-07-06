@@ -879,7 +879,7 @@ export function AdminJobDetail({
                       <span className="font-medium">Completion progress</span>
                       <span className="text-muted-foreground">{jobResults.length}/{expectedSubmissions || 0}</span>
                     </div>
-                    <div className="h-3 overflow-hidden rounded-full bg-muted">
+                    <div className="h-1 overflow-hidden rounded-full bg-muted">
                       <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${completionRate}%` }} />
                     </div>
                   </div>
