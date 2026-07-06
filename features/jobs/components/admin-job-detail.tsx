@@ -225,6 +225,7 @@ export function AdminJobDetail({
   const [candidateEmail, setCandidateEmail] = useState("");
   const [inviteExpiryDate, setInviteExpiryDate] = useState(defaultInviteExpiryInputValue);
   const [candidateSearch, setCandidateSearch] = useState("");
+  const [candidateEvaluationFilter, setCandidateEvaluationFilter] = useState<"all" | "evaluated" | "non-evaluated">("all");
   const [candidatePage, setCandidatePage] = useState(1);
   const [existingInvite, setExistingInvite] = useState<{
     candidate: Candidate;
@@ -312,12 +313,21 @@ export function AdminJobDetail({
   const filteredJobCandidates = useMemo(() => {
     const query = candidateSearch.trim().toLowerCase();
 
-    if (!query) return jobCandidates;
-
     return jobCandidates.filter((candidate) => {
       const candidateAssessmentIds = candidate.assessmentIds?.length
-        ? candidate.assessmentIds
+        ? candidate.assessmentIds.filter((id) => job.assessmentIds.includes(id))
         : [candidate.jobId];
+      const candidateResults = jobResults.filter((item) =>
+        item.candidateId
+          ? item.candidateId === candidate.id
+          : item.candidateEmail === candidate.email && candidateAssessmentIds.includes(item.assessmentId),
+      );
+      const isEvaluated = candidateResults.some((result) => result.evaluatedAt || result.decision);
+
+      if (candidateEvaluationFilter === "evaluated" && !isEvaluated) return false;
+      if (candidateEvaluationFilter === "non-evaluated" && isEvaluated) return false;
+      if (!query) return true;
+
       const candidateAssessments = job.assessments.filter((item) =>
         candidateAssessmentIds.includes(item.id),
       );
@@ -330,7 +340,7 @@ export function AdminJobDetail({
         ...candidateAssessments.flatMap((assessment) => [assessment.code, assessment.name]),
       ].some((value) => value.toLowerCase().includes(query));
     });
-  }, [candidateSearch, job.assessments, jobCandidates]);
+  }, [candidateEvaluationFilter, candidateSearch, job.assessmentIds, job.assessments, jobCandidates, jobResults]);
   const totalCandidatePages = Math.max(
     1,
     Math.ceil(filteredJobCandidates.length / CANDIDATES_PER_PAGE),
@@ -1106,18 +1116,42 @@ export function AdminJobDetail({
             <CardDescription>Open candidate assessment detail when a submission exists.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col space-y-4">
-            <div className="relative max-w-md">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={candidateSearch}
-                onChange={(event) => {
-                  setCandidateSearch(event.target.value);
-                  setCandidatePage(1);
-                }}
-                className="pl-9 focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
-                placeholder="Search candidate, email, or assessment"
-                aria-label="Search candidates"
-              />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative w-full sm:max-w-md">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={candidateSearch}
+                  onChange={(event) => {
+                    setCandidateSearch(event.target.value);
+                    setCandidatePage(1);
+                  }}
+                  className="pl-9 focus-visible:border-input focus-visible:ring-0 focus-visible:shadow-xs"
+                  placeholder="Search candidate, email, or assessment"
+                  aria-label="Search candidates"
+                />
+              </div>
+
+              <div className="flex w-full rounded-md border bg-muted/20 p-1 sm:w-auto" aria-label="Filter candidates by evaluation status">
+                {[
+                  { label: "All", value: "all" },
+                  { label: "Evaluated", value: "evaluated" },
+                  { label: "Non-evaluated", value: "non-evaluated" },
+                ].map((item) => (
+                  <Button
+                    key={item.value}
+                    type="button"
+                    size="sm"
+                    variant={candidateEvaluationFilter === item.value ? "secondary" : "ghost"}
+                    className="h-8 flex-1 rounded-sm px-3 text-xs sm:flex-none"
+                    onClick={() => {
+                      setCandidateEvaluationFilter(item.value as "all" | "evaluated" | "non-evaluated");
+                      setCandidatePage(1);
+                    }}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             <div className="flex-1 overflow-hidden rounded-md border">
@@ -1251,7 +1285,8 @@ export function AdminJobDetail({
                             {candidateResults.length ? (
                               <>
                                 <Badge variant="secondary">
-                                  {candidateResults.length}/{candidateAssessmentIds.length} submitted
+                                  {/* {candidateResults.length}/{candidateAssessmentIds.length}  */}
+                                  submitted
                                 </Badge>
                                 <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
                                   {formatDate(candidateResults[0].submittedAt)}
@@ -1262,25 +1297,25 @@ export function AdminJobDetail({
                               </>
                             ) : (
                               <>
-                                <Badge variant="outline">Waiting</Badge>
-                                <p className="mt-2 text-xs font-medium text-foreground">Not Attempted</p>
+                                <p className="text-xs font-medium text-foreground">Not Attempted</p>
+                                <p className="mt-1 text-xs text-muted-foreground">No submission yet</p>
                               </>
                             )}
                           </td>
 
                           <td className="px-4 py-3 text-right">
-                            <Link
-                              href={latestResult ? `/admin/submissions/${latestResult.id}` : "#"}
-                              onClick={(e) => {
-                                if (!latestResult) e.preventDefault();
-                              }}
-                              aria-disabled={!latestResult}
-                              className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground hover:text-black"
-                            >
-                              <span className="relative block w-fit after:absolute after:left-0 after:bottom-0 after:block after:h-[1px] after:w-full after:origin-center after:scale-x-0 after:bg-current after:transition after:duration-300 after:content-[''] hover:after:scale-x-100">
-                                {latestResult ? `View` : "Waiting"}
-                              </span>
-                            </Link>
+                            {latestResult ? (
+                              <Link
+                                href={`/admin/submissions/${latestResult.id}`}
+                                className="mr-1 inline-flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground hover:text-black"
+                              >
+                                <span className="relative block w-fit after:absolute after:left-0 after:bottom-0 after:block after:h-[1px] after:w-full after:origin-center after:scale-x-0 after:bg-current after:transition after:duration-300 after:content-[''] hover:after:scale-x-100">
+                                  View
+                                </span>
+                              </Link>
+                            ) : (
+                              <span className="text-xs text-muted-foreground"> WAITING </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1289,7 +1324,7 @@ export function AdminJobDetail({
                       <tr>
                         <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
                           {jobCandidates.length
-                            ? "No candidates match your search."
+                            ? "No candidates match your search or filter."
                             : "Invited candidates for this job will appear here."}
                         </td>
                       </tr>
