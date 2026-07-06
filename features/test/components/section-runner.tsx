@@ -1285,7 +1285,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
             </div>
             <Progress value={75} className="h-2" />
             <p className="text-xs text-muted-foreground">
-              Your submission is being saved securely. This usually takes a few seconds.
+              Your submission is being saved. This usually takes a few seconds.
             </p>
           </div>
         </DialogContent>

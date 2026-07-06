@@ -653,7 +653,7 @@ export function AdminSettings() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium">Manual sign-in details</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Share this first-time password securely.</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Share this first-time password.</p>
                         </div>
                         <div className="flex min-w-0 items-center rounded-md bg-muted/50 p-1 pl-3">
                           <code className="min-w-0 flex-1 break-all text-sm font-semibold">{fallbackPassword}</code>
