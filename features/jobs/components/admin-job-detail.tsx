@@ -68,7 +68,11 @@ function useAdminData() {
   );
   const loadData = useCallback(async () => {
     const snapshot = await fetchAdminDataSnapshot({ view: "analytics" });
-    setData({ candidates: snapshot.candidates, results: snapshot.results });
+    setData({
+      candidates: snapshot.candidates,
+      results: snapshot.results,
+      canViewCandidateOtp: snapshot.canViewCandidateOtp,
+    });
     setIsLoading(false);
   }, []);
 
@@ -79,7 +83,11 @@ function useAdminData() {
       try {
         const snapshot = await fetchAdminDataSnapshot({ view: "analytics" });
         if (active) {
-          setData({ candidates: snapshot.candidates, results: snapshot.results });
+          setData({
+            candidates: snapshot.candidates,
+            results: snapshot.results,
+            canViewCandidateOtp: snapshot.canViewCandidateOtp,
+          });
           setIsLoading(false);
         }
       } catch (error) {

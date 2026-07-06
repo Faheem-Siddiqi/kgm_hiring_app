@@ -13,3 +13,20 @@ when `DEV_MODE=true`; credentials are never included.
 Rules for attempting: 
 
 Keep the test window open and in fullscreen. Active question and section timers continue during refresh, disconnect, tab close, or power loss, so a 5 minute outage consumes 5 minutes from the active timers. If you skip a question, that question timer pauses and resumes from the saved remaining time when you reopen it. Submitted or timed-out questions cannot be edited.
+
+
+otp view authorization:
+role === "main-admin"
+OR designation contains "hod"
+OR designation contains "it"
+
+But for sub-admins, the app checks designation:
+role: sub-admin
+designation: Operations HOD
+=> can see OTP
+role: sub-admin
+designation: IT Administrator
+=> can see OTP
+role: sub-admin
+designation: HR Admin
+=> cannot see OTP

@@ -89,6 +89,7 @@ function useAdminData() {
         setAdminData({
           candidates: records.candidates,
           results: records.results,
+          canViewCandidateOtp: records.canViewCandidateOtp,
           jobs: (assessmentsPayload.assessments ?? []).map((assessment) => {
             const sectionTypeConfigs = Object.fromEntries(
               assessment.sectionSettings.map((section) => [
