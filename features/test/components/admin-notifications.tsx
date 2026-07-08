@@ -37,18 +37,39 @@ type AdminNotification = {
   href?: string;
 };
 
+type CandidateApplicationNotification = {
+  id: string;
+  candidateName: string;
+  candidateEmail: string;
+  jobTitle: string;
+  decisionStatus: "pending" | "invited" | "rejected";
+  createdAt: string;
+};
+
 const READ_NOTIFICATIONS_KEY = "kgm-hiring-admin-read-notifications";
 
 function useAdminData() {
   const [adminData, setAdminData] = useState<AdminSnapshot>({});
+  const [applications, setApplications] = useState<CandidateApplicationNotification[]>([]);
 
   useEffect(() => {
     let active = true;
 
     async function loadData() {
       try {
-        const data = await fetchAdminDataSnapshot({ view: "analytics" });
-        if (active) setAdminData({ candidates: data.candidates, results: data.results });
+        const [data, applicationsResponse] = await Promise.all([
+          fetchAdminDataSnapshot({ view: "analytics" }),
+          fetch("/api/admin/candidate-applications", { cache: "no-store" }),
+        ]);
+        const applicationsPayload = applicationsResponse.ok
+          ? ((await applicationsResponse.json()) as {
+              applications?: CandidateApplicationNotification[];
+            })
+          : {};
+        if (active) {
+          setAdminData({ candidates: data.candidates, results: data.results });
+          setApplications(applicationsPayload.applications ?? []);
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Could not load notifications.");
       }
@@ -65,6 +86,7 @@ function useAdminData() {
     candidates: adminData.candidates ?? [],
     jobs: adminData.jobs ?? [],
     results: adminData.results ?? [],
+    applications,
   };
 }
 
@@ -79,7 +101,18 @@ function buildAdminNotifications(
   jobs: JobAssessment[],
   candidates: Candidate[],
   results: AssessmentResult[],
+  applications: CandidateApplicationNotification[] = [],
 ) {
+  const applicationNotifications: AdminNotification[] = applications
+    .filter((application) => application.decisionStatus === "pending")
+    .map((application) => ({
+      id: `application-${application.id}`,
+      title: "New job application",
+      description: `${application.candidateName} applied for ${application.jobTitle}`,
+      time: formatDate(application.createdAt),
+      tone: "warning",
+      href: `/admin/candidate-applications/${application.id}`,
+    }));
   const resultNotifications: AdminNotification[] = results.map((result) => ({
     id: `result-${result.id}`,
     title: `${result.candidateName} submitted`,
@@ -111,6 +144,7 @@ function buildAdminNotifications(
   }));
 
   return [
+    ...applicationNotifications,
     ...resultNotifications,
     ...inviteNotifications,
     ...assessmentNotifications,
@@ -134,13 +168,13 @@ function writeNotificationIds(ids: string[]) {
 }
 
 export function AdminNotifications() {
-  const { candidates, jobs, results } = useAdminData();
+  const { applications, candidates, jobs, results } = useAdminData();
   const [readNotifications, setReadNotifications] = useState<string[]>(() =>
     readNotificationIds(),
   );
   const notifications = useMemo(
-    () => buildAdminNotifications(jobs, candidates, results),
-    [candidates, jobs, results],
+    () => buildAdminNotifications(jobs, candidates, results, applications),
+    [applications, candidates, jobs, results],
   );
   const unreadCount = notifications.filter(
     (notification) => !readNotifications.includes(notification.id),

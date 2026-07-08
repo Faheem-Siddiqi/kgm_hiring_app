@@ -1,25 +1,39 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import {
   Bell,
   BriefcaseBusiness,
+  ClipboardCheck,
   ClipboardList,
   Files,
   LayoutDashboard,
   LogOut,
   Menu,
   Settings,
-  ShieldCheck,
   UserCircle,
   X,
 } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+
+
+
+
+
 
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import lightLogo from "@/src/assets/LightLogo.png";
+
+
+
+
+
+
 
 type AdminNavbarProps = {
   notificationCount?: number;
@@ -55,10 +69,22 @@ type HiringRecordsResponse = {
   }>;
 };
 
+type CandidateApplicationsResponse = {
+  applications?: Array<{
+    id: string;
+    candidateName: string;
+    candidateEmail: string;
+    jobTitle: string;
+    decisionStatus: "pending" | "invited" | "rejected";
+    createdAt: string;
+  }>;
+};
+
 const navItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { label: "Assessments", href: "/admin/assessments", icon: ClipboardList },
   { label: "Jobs", href: "/admin/jobs", icon: BriefcaseBusiness },
+  { label: "Applications", href: "/admin/candidate-applications", icon: ClipboardCheck },
   { label: "Submissions", href: "/admin/submissions", icon: Files },
 ];
 
@@ -105,6 +131,20 @@ function buildNotifications(records: HiringRecordsResponse) {
   return [...resultNotifications, ...inviteNotifications];
 }
 
+function buildApplicationNotifications(records: CandidateApplicationsResponse) {
+  return (records.applications ?? [])
+    .filter((application) => application.decisionStatus === "pending")
+    .slice(0, 6)
+    .map((application) => ({
+      id: `application-${application.id}`,
+      title: "New job application",
+      description: `${application.candidateName} applied for ${application.jobTitle}`,
+      time: formatNotificationDate(application.createdAt),
+      href: `/admin/candidate-applications/${application.id}`,
+      tone: "warning" as const,
+    }));
+}
+
 export function AdminNavbar({
   notificationCount = 0,
   notificationsOpen = false,
@@ -132,12 +172,21 @@ export function AdminNavbar({
 
     async function loadNotifications() {
       try {
-        const response = await fetch("/api/admin/hiring-records", {
-          cache: "no-store",
-        });
-        if (!response.ok) return;
-        const records = (await response.json()) as HiringRecordsResponse;
-        if (active) setNotifications(buildNotifications(records));
+        const [recordsResponse, applicationsResponse] = await Promise.all([
+          fetch("/api/admin/hiring-records", { cache: "no-store" }),
+          fetch("/api/admin/candidate-applications", { cache: "no-store" }),
+        ]);
+        if (!recordsResponse.ok) return;
+        const records = (await recordsResponse.json()) as HiringRecordsResponse;
+        const applications = applicationsResponse.ok
+          ? ((await applicationsResponse.json()) as CandidateApplicationsResponse)
+          : {};
+        if (active) {
+          setNotifications([
+            ...buildApplicationNotifications(applications),
+            ...buildNotifications(records),
+          ]);
+        }
       } catch {
         if (active) setNotifications([]);
       }
@@ -158,11 +207,16 @@ export function AdminNavbar({
   return (
     <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-        <Link href="/admin" className="flex min-w-0 items-center gap-2 font-semibold">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-card">
-            <ShieldCheck className="size-4" />
+        <Link href="/admin" className="flex min-w-0 justify-center items-center gap-1 font-semibold">
+          <span className="shrink-0 items-center justify-center ">
+            <Image
+              src={lightLogo}
+              alt="KGM hiring workspace logo"
+              className="size-6 grayscale object-contain"
+              priority
+            />
           </span>
-          <span className="truncate">KGM Hiring Workspace</span>
+          <span className="truncate mt-[0.25rem]">KGM Hiring Workspace</span>
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">

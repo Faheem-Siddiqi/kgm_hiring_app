@@ -8,7 +8,7 @@ import {
 } from "@/lib/admin-session";
 import { validateAdminSessionToken } from "@/lib/admin-users";
 
-export async function requireAdminPageSession() {
+export async function requireAdminPageSession(redirectTo?: string) {
   const cookieStore = await cookies();
   const session = await validateAdminSessionToken(
     getAdminSessionToken(cookieStore.get(ADMIN_SESSION_COOKIE)?.value),
@@ -16,7 +16,11 @@ export async function requireAdminPageSession() {
 
   if (!session) {
     cookieStore.delete(ADMIN_SESSION_COOKIE);
-    redirect("/admin/auth-required?reason=expired");
+    const query = new URLSearchParams({ reason: "expired" });
+    if (redirectTo?.startsWith("/") && !redirectTo.startsWith("//")) {
+      query.set("redirect", redirectTo);
+    }
+    redirect(`/admin/auth-required?${query.toString()}`);
   }
 
   return session;

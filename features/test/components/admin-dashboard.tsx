@@ -53,6 +53,15 @@ type AdminNotification = {
   href?: string;
 };
 
+type CandidateApplicationNotification = {
+  id: string;
+  candidateName: string;
+  candidateEmail: string;
+  jobTitle: string;
+  decisionStatus: "pending" | "invited" | "rejected";
+  createdAt: string;
+};
+
 type DashboardInvite = {
   id: string;
   name: string;
@@ -234,7 +243,19 @@ function buildAdminNotifications(
   jobs: JobAssessment[],
   candidates: Candidate[],
   results: AssessmentResult[],
+  applications: CandidateApplicationNotification[] = [],
 ) {
+  const applicationNotifications: AdminNotification[] = applications
+    .filter((application) => application.decisionStatus === "pending")
+    .slice(0, 4)
+    .map((application) => ({
+      id: `application-${application.id}`,
+      title: "New job application",
+      description: `${application.candidateName} applied for ${application.jobTitle}`,
+      time: formatDate(application.createdAt),
+      tone: "warning",
+      href: `/admin/candidate-applications/${application.id}`,
+    }));
   const resultNotifications: AdminNotification[] = results.slice(0, 3).map(
     (result) => ({
       id: `result-${result.id}`,
@@ -271,6 +292,7 @@ function buildAdminNotifications(
   );
 
   return [
+    ...applicationNotifications,
     ...resultNotifications,
     ...inviteNotifications,
     ...assessmentNotifications,
@@ -1274,12 +1296,37 @@ export function AdminDashboard({
   initialHiringStats,
 }: AdminDashboardProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [applications, setApplications] = useState<CandidateApplicationNotification[]>([]);
   const [jobPage, setJobPage] = useState(1);
   const [jobSearch, setJobSearch] = useState("");
   const [readNotifications, setReadNotifications] = useState<string[]>(() =>
     readNotificationIds(),
   );
   const { candidates, jobs, results, isLoading } = useAdminData(true);
+  useEffect(() => {
+    let active = true;
+
+    async function loadApplications() {
+      try {
+        const response = await fetch("/api/admin/candidate-applications", {
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          applications?: CandidateApplicationNotification[];
+        };
+        if (active) setApplications(payload.applications ?? []);
+      } catch {
+        if (active) setApplications([]);
+      }
+    }
+
+    void loadApplications();
+
+    return () => {
+      active = false;
+    };
+  }, []);
   const dashboardJobs = useMemo(
     () =>
       jobs.length
@@ -1288,8 +1335,8 @@ export function AdminDashboard({
     [initialServerAssessments, jobs],
   );
   const notifications = useMemo(
-    () => buildAdminNotifications(dashboardJobs, candidates, results).slice(0, 6),
-    [dashboardJobs, candidates, results],
+    () => buildAdminNotifications(dashboardJobs, candidates, results, applications).slice(0, 6),
+    [applications, dashboardJobs, candidates, results],
   );
   const unreadNotifications = notifications.filter(
     (notification) => !readNotifications.includes(notification.id),

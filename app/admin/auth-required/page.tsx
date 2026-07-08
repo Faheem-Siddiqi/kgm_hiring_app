@@ -1,5 +1,6 @@
-import Link from "next/link";
 import { BriefcaseBusiness, LockKeyhole, ShieldAlert } from "lucide-react";
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,13 +11,18 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+
 export default async function AdminAuthRequiredPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reason?: string }>;
+  searchParams: Promise<{ reason?: string; redirect?: string }>;
 }) {
-  const { reason } = await searchParams;
+  const { reason, redirect } = await searchParams;
   const isExpired = reason === "expired";
+  const loginHref =
+    redirect?.startsWith("/") && !redirect.startsWith("//")
+      ? `/admin/login?redirect=${encodeURIComponent(redirect)}`
+      : "/admin/login";
 
   return (
     <main className="min-h-svh bg-background text-foreground">
@@ -39,7 +45,7 @@ export default async function AdminAuthRequiredPage({
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button asChild>
-                <Link href="/admin/login">
+                <Link href={loginHref}>
                   <LockKeyhole className="size-4" />
                   Sign in
                 </Link>
@@ -60,8 +66,8 @@ export default async function AdminAuthRequiredPage({
               </div>
               <CardTitle>Hiring Workspace</CardTitle>
               <CardDescription>
-                Protected tools for posting jobs, managing assessment resources,
-                and reviewing candidate activity.
+              Sign in to manage hiring workflows securely.
+
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 text-sm">

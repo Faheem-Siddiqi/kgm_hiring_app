@@ -26,6 +26,7 @@ import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 
+import { CandidateThemeCorner } from "@/components/theme/candidate-theme-corner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -1296,6 +1297,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   if (!activeCandidate || activeAssessmentSubmitted || isInviteExpired) {
     return (
       <main className="min-h-svh bg-background px-4 py-20 text-foreground sm:px-6 lg:px-8">
+        <CandidateThemeCorner />
         <section className="mx-auto w-full max-w-3xl">
           <Card>
             <CardHeader>
@@ -1320,6 +1322,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
   if (!currentQuestion) {
     return (
       <main className="min-h-svh bg-background px-4 py-20 text-foreground sm:px-6 lg:px-8">
+        <CandidateThemeCorner />
         <section className="mx-auto w-full max-w-3xl">
           <Card>
             <CardHeader>
@@ -1353,6 +1356,7 @@ export function SectionRunner({ sectionSlug }: SectionRunnerProps) {
         onCopy={preventContentCopy}
         onCut={preventContentCopy}
       >
+        <CandidateThemeCorner />
         <section className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[0.8fr_1.4fr]">
           <aside className="space-y-6">
             <Card>

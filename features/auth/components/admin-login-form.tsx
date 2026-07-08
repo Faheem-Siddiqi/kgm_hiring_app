@@ -1,18 +1,23 @@
 "use client";
 import { FormEvent, useState } from "react";
 import { BriefcaseBusiness, KeyRound, LockKeyhole, ShieldCheck, UserRoundCog } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import darkLogo from "@/src/assets/DarkLogo.png";
+
 
 export function AdminLoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -36,7 +41,12 @@ export function AdminLoginForm() {
     }
 
     toast.success("Authenticated. Welcome to KGM Hiring Workplace");
-    router.replace("/admin");
+    const redirectTo = searchParams.get("redirect");
+    router.replace(
+      redirectTo?.startsWith("/") && !redirectTo.startsWith("//")
+        ? redirectTo
+        : "/admin",
+    );
     router.refresh();
   }
 
@@ -80,7 +90,12 @@ export function AdminLoginForm() {
         <Card className="shadow-xs">
         <CardHeader className="space-y-4">
           <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <BriefcaseBusiness className="size-5" />
+            <Image
+              src={darkLogo}
+              alt="KGM hiring logo"
+              className="size-7 object-contain"
+              priority
+            />
           </div>
           <div>
             <CardTitle className="text-2xl">Hiring Workspace</CardTitle>

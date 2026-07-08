@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import { CandidateThemeCorner } from "@/components/theme/candidate-theme-corner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -362,27 +363,30 @@ export function TestOverview() {
 
   if (!activeAssessment || !activeCandidate) {
     return (
-      <section className="mx-auto flex min-h-[70vh] w-full max-w-4xl items-center justify-center px-4 py-10 sm:px-6">
-        <Card className="w-full border-dashed shadow-none">
-          <CardHeader className="items-center text-center">
-            <div className="mb-3 flex size-14 items-center justify-center rounded-md bg-muted">
-              <ShieldCheck className="size-7 text-muted-foreground" />
-            </div>
+      <>
+        <CandidateThemeCorner />
+        <section className="mx-auto flex min-h-[70vh] w-full max-w-4xl items-center justify-center px-4 py-8 sm:px-6">
+          <Card className="w-full border-dashed shadow-none">
+            <CardHeader className="items-center text-center">
+              <div className="mb-3 flex size-14 items-center justify-center rounded-md bg-muted">
+                <ShieldCheck className="size-7 text-muted-foreground" />
+              </div>
 
-            <CardTitle className="text-2xl">No assessment assigned</CardTitle>
+              <CardTitle className="text-2xl">No assessment assigned</CardTitle>
 
-            <CardDescription className="mx-auto max-w-xl text-base leading-7">
-              Enter a valid candidate invitation OTP before opening the assessment.
-            </CardDescription>
-          </CardHeader>
+              <CardDescription className="mx-auto max-w-xl text-base leading-7">
+                Enter a valid candidate invitation OTP before opening the assessment.
+              </CardDescription>
+            </CardHeader>
 
-          <CardContent className="flex justify-center pb-8">
-            <Button asChild size="lg">
-              <Link href="/">Go to candidate portal</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </section>
+            <CardContent className="flex justify-center pb-8">
+              <Button asChild size="lg">
+                <Link href="/">Go to candidate portal</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
+      </>
     );
   }
 
@@ -392,6 +396,7 @@ export function TestOverview() {
 
   return (
     <>
+      <CandidateThemeCorner />
       {isOpeningSection ? (
         <>
           <div className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-muted">
@@ -551,8 +556,6 @@ className=' lg:my-5 mb-5'
                                 Sections
                               </CardTitle>
 
-
-                              <Badge variant="secondary" className="w-fit rounded-[6px] px-2 " > {activeSections.length || assessment.sectionCount}{" "} sections </Badge>
 </div>
                               <CardDescription className="mt-1 max-w-2xl text-sm leading-6">
                                 Open any available section. Progress, answers,
