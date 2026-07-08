@@ -614,9 +614,16 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                           <span className="text-sm font-medium">
                             Section-{roman[index] ?? index + 1}
                           </span>
-                          <Badge variant={textToReview ? "secondary" : "outline"}>
-                            {textToReview}
-                          </Badge>
+                          <Badge
+  variant={textToReview ? "secondary" : "outline"}
+  className={
+    isActive && textToReview === 0
+      ? "border-primary-foreground/40 bg-primary-foreground/15 text-primary-foreground"
+      : ""
+  }
+>
+  {textToReview}
+</Badge>
                         </div>
                         <p
                           className={[
