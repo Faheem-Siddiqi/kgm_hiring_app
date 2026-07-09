@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  HelpCircle,
   Settings,
   UserCircle,
   X,
@@ -344,6 +345,12 @@ export function AdminNavbar({
             </Button>
             {profileOpen ? (
               <div className="absolute right-0 top-11 z-30 w-52 rounded-lg border bg-card p-2 text-card-foreground shadow-lg">
+                <Button asChild variant="ghost" size="sm" className="w-full justify-start">
+                  <Link href="/admin/help" onClick={() => setProfileOpen(false)}>
+                    <HelpCircle className="size-4" />
+                    Help guide
+                  </Link>
+                </Button>
                 <Button asChild variant="ghost" size="sm" className="w-full justify-start">
                   <Link href="/admin/settings" onClick={() => setProfileOpen(false)}>
                     <Settings className="size-4" />
