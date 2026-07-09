@@ -292,48 +292,61 @@ export function AdminAssessmentDetail({ assessment }: { assessment: PublicAssess
 
                       return (
                         <div
-                          key={type}
-                          className="grid gap-3 rounded-md border bg-background p-3 sm:grid-cols-[minmax(150px,0.45fr)_minmax(0,1fr)] sm:items-start"
-                        >
-                          <p className="text-sm font-medium">{TYPE_LABELS[type]}</p>
-                          <div className="grid gap-3 min-[420px]:grid-cols-2">
-                            <Input
-                              type="number"
-                              min={0}
-                              max={maxQuantity}
-                              disabled={maxQuantity <= 0}
-                              placeholder={`Quantity (max ${maxQuantity})`}
-                              value={quantity}
-                              onChange={(event) =>
-                                updateTypeSetting(
-                                  activeSection.sectionId,
-                                  type,
-                                  "quantity",
-                                  clampSettingValue(event.target.value, 0, maxQuantity),
-                                )
-                              }
-                            />
-                            <Input
-                              type="number"
-                              min={0}
-                              max={3600}
-                              disabled={timeDisabled}
-                              placeholder="Time (sec)"
-                              value={timeDisabled ? 0 : activeSection.types[type].timeLimitSeconds}
-                              onChange={(event) =>
-                                updateTypeSetting(
-                                  activeSection.sectionId,
-                                  type,
-                                  "timeLimitSeconds",
-                                  clampSettingValue(event.target.value, 1, 3600),
-                                )
-                              }
-                            />
-                          </div>
-                          <p className="mt-2 text-xs text-muted-foreground">
-                            {maxQuantity} available in JSON
-                          </p>
-                        </div>
+  key={type}
+  className="grid gap-4 rounded-md border bg-background p-4 sm:grid-cols-[minmax(150px,0.45fr)_minmax(0,1fr)] sm:items-start"
+>
+  <p className="text-sm font-medium">{TYPE_LABELS[type]}</p>
+
+  <div className="grid gap-4 min-[420px]:grid-cols-2">
+    <div className="space-y-2">
+      <label className="text-xs font-medium text-muted-foreground">
+        Quantity
+      </label>
+      <Input
+        type="number"
+        min={0}
+        max={maxQuantity}
+        disabled={maxQuantity <= 0}
+        placeholder={`Max ${maxQuantity}`}
+        value={quantity}
+        onChange={(event) =>
+          updateTypeSetting(
+            activeSection.sectionId,
+            type,
+            "quantity",
+            clampSettingValue(event.target.value, 0, maxQuantity),
+          )
+        }
+      />
+    </div>
+
+    <div className="space-y-2">
+      <label className="text-xs font-medium text-muted-foreground">
+        Time (sec)
+      </label>
+      <Input
+        type="number"
+        min={0}
+        max={3600}
+        disabled={timeDisabled}
+        placeholder="Enter time"
+        value={timeDisabled ? 0 : activeSection.types[type].timeLimitSeconds}
+        onChange={(event) =>
+          updateTypeSetting(
+            activeSection.sectionId,
+            type,
+            "timeLimitSeconds",
+            clampSettingValue(event.target.value, 1, 3600),
+          )
+        }
+      />
+    </div>
+  </div>
+
+  <p className="text-xs text-muted-foreground sm:col-span-2">
+    {maxQuantity} available in JSON 
+  </p>
+</div>
                       );
                     })}
                   </div>

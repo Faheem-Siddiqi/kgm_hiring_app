@@ -8,6 +8,11 @@ import { AppError } from "@/lib/server-error";
 export type CandidateApplicationEmailStatus = "pending" | "sent" | "failed";
 export type CandidateApplicationDecisionStatus = "pending" | "invited" | "rejected";
 
+export type CandidateApplicationDecisionActor = {
+  name: string;
+  email: string;
+};
+
 type CandidateApplicationDocument = {
   jobId: ObjectId;
   jobTitle: string;
@@ -20,6 +25,7 @@ type CandidateApplicationDocument = {
   decisionStatus: CandidateApplicationDecisionStatus;
   decisionEmailStatus?: CandidateApplicationEmailStatus;
   decisionEmailFailure?: string;
+  decidedBy?: CandidateApplicationDecisionActor;
   decidedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -38,6 +44,7 @@ export type PublicCandidateApplication = {
   decisionStatus: CandidateApplicationDecisionStatus;
   decisionEmailStatus?: CandidateApplicationEmailStatus;
   decisionEmailFailure?: string;
+  decidedBy?: CandidateApplicationDecisionActor;
   decidedAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -118,6 +125,7 @@ function toPublicApplication(
     decisionStatus: application.decisionStatus ?? "pending",
     decisionEmailStatus: application.decisionEmailStatus,
     decisionEmailFailure: application.decisionEmailFailure,
+    decidedBy: application.decidedBy,
     decidedAt: application.decidedAt?.toISOString(),
     createdAt: application.createdAt.toISOString(),
     updatedAt: application.updatedAt.toISOString(),
@@ -177,9 +185,16 @@ export async function createCandidateApplication(input: {
     );
   }
 
-  const job = await getJobById(input.jobId);
+  const job = await getJobById(input.jobId, { includeInactive: true });
   if (!job) {
     throw new CandidateApplicationError("This job is not accepting applications.", 404);
+  }
+
+  if (job.status === "paused" || job.status === "closed") {
+    throw new CandidateApplicationError(
+      "This role is not accepting new applications right now.",
+      409,
+    );
   }
 
   const now = new Date();
@@ -232,6 +247,7 @@ export async function updateCandidateApplicationDecision(
   decisionStatus: Exclude<CandidateApplicationDecisionStatus, "pending">,
   emailStatus?: CandidateApplicationEmailStatus,
   failure?: string | null,
+  decidedBy?: CandidateApplicationDecisionActor,
 ) {
   if (!ObjectId.isValid(applicationId)) return null;
 
@@ -245,6 +261,7 @@ export async function updateCandidateApplicationDecision(
         updatedAt: new Date(),
         ...(emailStatus ? { decisionEmailStatus: emailStatus } : {}),
         ...(failure ? { decisionEmailFailure: failure } : {}),
+        ...(decidedBy ? { decidedBy } : {}),
       },
       ...(failure ? {} : { $unset: { decisionEmailFailure: "" as const } }),
     },

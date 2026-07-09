@@ -84,6 +84,10 @@ export const PATCH = withErrorHandler(async (
       "invited",
       body.mailSent === false ? "failed" : "sent",
       body.mailReason,
+      {
+        name: session.user.name,
+        email: session.user.email,
+      },
     );
 
     return NextResponse.json({
@@ -105,6 +109,10 @@ export const PATCH = withErrorHandler(async (
     "rejected",
     mail.sent ? "sent" : "failed",
     mail.reason,
+    {
+      name: session.user.name,
+      email: session.user.email,
+    },
   );
 
   return NextResponse.json({

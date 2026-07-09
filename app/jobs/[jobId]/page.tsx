@@ -10,7 +10,7 @@ export default async function JobDetailPage({
   params: Promise<{ jobId: string }>;
 }) {
   const { jobId } = await params;
-  const job = await getJobBySlug(jobId);
+  const job = await getJobBySlug(jobId, { includeInactive: true });
 
   if (!job) {
     notFound();

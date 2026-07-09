@@ -45,6 +45,10 @@ type CandidateApplication = {
   decisionStatus: "pending" | "invited" | "rejected";
   decisionEmailStatus?: "pending" | "sent" | "failed";
   decisionEmailFailure?: string;
+  decidedBy?: {
+    name: string;
+    email: string;
+  };
   decidedAt?: string;
   createdAt: string;
 };
@@ -371,6 +375,14 @@ export function AdminCandidateApplicationDetail({
       : application.decisionStatus === "rejected"
         ? "This application has already been rejected."
         : "Accept the application by sending an assessment invite, or send a rejection email.";
+  const decisionActionLabel =
+    application.decisionStatus === "invited"
+      ? "accepted"
+      : application.decisionStatus === "rejected"
+        ? "rejected"
+        : "";
+  const decisionAdminName = application.decidedBy?.name?.trim();
+  const decisionAdminEmail = application.decidedBy?.email?.trim();
 
   return (
     <main className="min-h-svh bg-background text-foreground">
@@ -479,6 +491,26 @@ export function AdminCandidateApplicationDetail({
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {isDecisionFinal ? (
+                <div className="mb-4 rounded-md border bg-muted/20 p-3 text-sm">
+                  <p className="font-medium capitalize">
+                    Application {decisionActionLabel}
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    {decisionAdminName
+                      ? `${decisionAdminName} ${decisionActionLabel} this application${
+                          application.decidedAt ? ` on ${formatDate(application.decidedAt)}` : ""
+                        }.`
+                      : `This application was ${decisionActionLabel}, but the admin name was not recorded.`}
+                  </p>
+                  {decisionAdminEmail ? (
+                    <p className="mt-1 break-all text-xs text-muted-foreground">
+                      {decisionAdminEmail}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
               <form className="space-y-4" onSubmit={handleInvite}>
                 <div className="space-y-2">
                   <Label htmlFor="invite-name">Candidate name</Label>

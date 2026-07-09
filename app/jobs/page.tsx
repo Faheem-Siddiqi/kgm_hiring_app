@@ -16,7 +16,10 @@ export default async function JobsPage({
   if (page) query.set("page", page);
   if (pageSize) query.set("pageSize", pageSize);
 
-  const { jobs, pagination } = await listJobs(parsePaginationParams(query));
+  const { jobs, pagination } = await listJobs({
+    ...parsePaginationParams(query),
+    includeInactive: true,
+  });
 
   return <JobListing jobs={jobs} pagination={pagination} />;
 }

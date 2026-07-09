@@ -1099,7 +1099,7 @@ export function AdminJobDetail({
                               {result.candidateEmail}
                             </p>
                           </div>
-                          <Badge variant="secondary">{result.score}%</Badge>
+                          <Badge variant="secondary">Score: {result.score}%</Badge>
                         </div>
                         <p className="mt-2 text-xs text-muted-foreground">
                           Submitted {formatDate(result.submittedAt)}

@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import {
   Building2,
   CheckCircle2,
@@ -8,6 +8,7 @@ import {
   MapPinned,
   Phone,
   Send,
+  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -30,13 +31,23 @@ type ApplicationResponse = {
 };
 
 export function JobApplicationCard({ jobs }: { jobs: PublicJob[] }) {
-  const [jobId, setJobId] = useState(jobs[0]?.id ?? "");
+  const firstAvailableJobId =
+    jobs.find((job) => job.status === "open" || job.status === "reopened")?.id ??
+    jobs[0]?.id ??
+    "";
+  const [jobId, setJobId] = useState(firstAvailableJobId);
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
   const [cvUrl, setCvUrl] = useState("");
   const [availability, setAvailability] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedMessage, setSubmittedMessage] = useState("");
+  const selectedJob = useMemo(
+    () => jobs.find((job) => job.id === jobId) ?? jobs[0],
+    [jobId, jobs],
+  );
+  const isSelectedJobClosed =
+    selectedJob?.status === "paused" || selectedJob?.status === "closed";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -44,6 +55,11 @@ export function JobApplicationCard({ jobs }: { jobs: PublicJob[] }) {
 
     if (!jobId) {
       toast.error("Select a job before submitting your application.");
+      return;
+    }
+
+    if (isSelectedJobClosed) {
+      toast.error("This role is not accepting new applications right now.");
       return;
     }
 
@@ -107,6 +123,20 @@ export function JobApplicationCard({ jobs }: { jobs: PublicJob[] }) {
             </div>
           </div>
         ) : null}
+        {isSelectedJobClosed ? (
+          <div className="mb-4 rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="flex items-start gap-2">
+              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="space-y-1">
+                <p className="font-medium">Applications are currently closed</p>
+                <p className="text-muted-foreground">
+                  This role is {selectedJob?.status}. Please choose another open
+                  role or check back after the hiring team reopens it.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="space-y-2">
             <Label htmlFor="application-job">Job</Label>
@@ -121,6 +151,9 @@ export function JobApplicationCard({ jobs }: { jobs: PublicJob[] }) {
               {jobs.map((job) => (
                 <option key={job.id} value={job.id}>
                   {job.title}
+                  {job.status === "paused" || job.status === "closed"
+                    ? ` (${job.status})`
+                    : ""}
                 </option>
               ))}
             </select>
@@ -172,14 +205,18 @@ export function JobApplicationCard({ jobs }: { jobs: PublicJob[] }) {
           <Button
             className="w-full"
             type="submit"
-            disabled={isSubmitting || !jobs.length}
+            disabled={isSubmitting || !jobs.length || isSelectedJobClosed}
           >
             {isSubmitting ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <Send className="size-4" />
             )}
-            {isSubmitting ? "Submitting..." : "Submit application"}
+            {isSelectedJobClosed
+              ? "Applications closed"
+              : isSubmitting
+                ? "Submitting..."
+                : "Submit application"}
           </Button>
         </form>
       </CardContent>

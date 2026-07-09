@@ -3,10 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
+  ClipboardCheck,
   Loader2,
   Mail,
   Send,
-  ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -398,6 +398,8 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
 
   const submissionRecord = submission;
   const terminalDecision = submissionRecord.decision;
+  const finalDecisionSent =
+    terminalDecision === "accepted" || terminalDecision === "rejected";
   const reviewLocked = Boolean(terminalDecision);
   const evaluationLocked = Boolean(submissionRecord.evaluatedAt);
   const textQuestions = sections.flatMap((section) =>
@@ -406,6 +408,40 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
   const unreviewedTextCount = textQuestions.filter(
     (question) => submissionRecord.textScores?.[question.id] === undefined,
   ).length;
+  const questionStats = sections
+    .flatMap((section) => section.questions)
+    .reduce(
+      (stats, question) => {
+        const answer = submissionRecord.answers?.[question.id] ?? "";
+        const provided = answer.split("||").filter(Boolean).sort();
+        const expected =
+          question.type === "text"
+            ? []
+            : [...(question.correctAnswers ?? [])].sort();
+        const hasAnswer = provided.length > 0;
+        const isReviewedText =
+          question.type === "text" &&
+          submissionRecord.textScores?.[question.id] !== undefined;
+        const isCorrect =
+          question.type !== "text" &&
+          hasAnswer &&
+          expected.length > 0 &&
+          expected.length === provided.length &&
+          expected.every((value, answerIndex) => value === provided[answerIndex]);
+
+        return {
+          attempted: stats.attempted + (hasAnswer ? 1 : 0),
+          correct: stats.correct + (isCorrect ? 1 : 0),
+          incorrect:
+            stats.incorrect +
+            (question.type !== "text" && hasAnswer && !isCorrect ? 1 : 0),
+          reviewRequired:
+            stats.reviewRequired +
+            (question.type === "text" && hasAnswer && !isReviewedText ? 1 : 0),
+        };
+      },
+      { attempted: 0, correct: 0, incorrect: 0, reviewRequired: 0 },
+    );
 
   async function saveReview(
     action: SubmissionAction | "evaluated",
@@ -458,12 +494,13 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
     to: string;
     subject: string;
   }) {
-    if (reviewLocked || evaluationLocked) {
-      toast.error(
-        evaluationLocked
-          ? "This submission has already been evaluated."
-          : "This submission already has a final review decision.",
-      );
+    if ((action === "accepted" || action === "rejected") && finalDecisionSent) {
+      toast.error("A final decision email has already been sent for this submission.");
+      return;
+    }
+
+    if (reviewLocked) {
+      toast.error("This submission already has a review decision.");
       return;
     }
 
@@ -678,7 +715,9 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                             </div>
                             <Badge variant={question.type === "text" ? "outline" : isCorrect ? "default" : "secondary"}>
                               {question.type === "text"
-                                ? "Manual text"
+                                ? submission.textScores?.[question.id] === undefined
+                                  ? "Review Required"
+                                  : "Reviewed"
                                 : isCorrect
                                   ? "Correct"
                                   : hasAnswer
@@ -783,16 +822,31 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                     <p className="font-medium">{submission.candidateEmail}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Answered</p>
-                    <p className="font-medium">
-                      {submission.answeredCount}/{submission.totalQuestions}
-                    </p>
-                  </div>
-                  <div>
                     <p className="text-xs text-muted-foreground">Violations</p>
                     <p className="font-medium">{submission.violations.length}</p>
                   </div>
                 </div>
+
+               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
+  {[
+    ["Attempted", `${questionStats.attempted}/${submission.totalQuestions}`],
+    ["Correct", questionStats.correct],
+    ["Incorrect", questionStats.incorrect],
+    ["Review Required", questionStats.reviewRequired],
+  ].map(([label, value]) => (
+    <div
+      key={label}
+      className="mx-auto flex min-w-0 flex-col items-center justify-center rounded-md bg-background p-2 text-center"
+    >
+      <p className="truncate text-xs text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-1 text-lg font-semibold">
+        {value}
+      </p>
+    </div>
+  ))}
+</div>
 
                 <Button
                   type="button"
@@ -807,33 +861,48 @@ export function AdminSubmissionDetail({ submissionId }: { submissionId: string }
                   )}
                   {submission.evaluatedAt ? "Evaluated" : "Mark evaluated"}
                 </Button>
+                {finalDecisionSent ? (
+                  <div className="rounded-md text-center  text-sm text-emerald-700 dark:text-emerald-300">
+                    <div className="flex items-start justify-center gap-2">
+                      <ClipboardCheck className="mt-0.5 size-4 shrink-0" />
+                      <span>
+                        Final decision email already sent. 
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={sendAcceptanceEmail}
-                    disabled={Boolean(sendingAction) || reviewLocked}
-                  >
-                    {sendingAction === "accepted" ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Send className="size-4" />
-                    )}
-                    {terminalDecision === "accepted" ? "Accepted" : "Acceptance email"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={sendRejectionEmail}
-                    disabled={Boolean(sendingAction) || reviewLocked}
-                  >
-                    {sendingAction === "rejected" ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Mail className="size-4" />
-                    )}
-                    {terminalDecision === "rejected" ? "Rejected" : "Rejection email"}
-                  </Button>
+                  {!terminalDecision && (
+  <>
+    <Button
+      type="button"
+      variant="outline"
+      onClick={sendAcceptanceEmail}
+      disabled={Boolean(sendingAction) || finalDecisionSent}
+    >
+      {sendingAction === "accepted" ? (
+        <Loader2 className="size-4 animate-spin" />
+      ) : (
+        <Send className="size-4" />
+      )}
+      Acceptance email
+    </Button>
+
+    <Button
+      type="button"
+      variant="outline"
+      onClick={sendRejectionEmail}
+      disabled={Boolean(sendingAction) || finalDecisionSent}
+    >
+      {sendingAction === "rejected" ? (
+        <Loader2 className="size-4 animate-spin" />
+      ) : (
+        <Mail className="size-4" />
+      )}
+      Rejection email
+    </Button>
+  </>
+)}
                 </div>
 
                 <div className="space-y-2 rounded-md border p-3">

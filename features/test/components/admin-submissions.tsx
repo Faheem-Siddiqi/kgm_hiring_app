@@ -255,12 +255,12 @@ export function AdminSubmissions() {
                           <Badge variant={getReviewTone(reviewStatus)}>
                             {reviewStatus}
                           </Badge>
-                          <Badge variant="outline">{submission.score}%</Badge>
+                          <Badge variant="outline">Score: {submission.score}%</Badge>
                         </div>
                       </div>
                       <div className="grid gap-2 text-sm sm:grid-cols-3">
                         <div className="rounded-md bg-muted/35 p-3">
-                          <p className="text-xs text-muted-foreground">Answered</p>
+                          <p className="text-xs text-muted-foreground">Total Attempted</p>
                           <p className="font-medium">
                             {submission.answeredCount}/{submission.totalQuestions}
                           </p>
