@@ -57,10 +57,10 @@ const flowSteps: GuideStep[] = [
     keywords: ["assessment", "json", "question bank", "section", "configuration", "time", "questions"],
     details: [
       "Assessment setup is the first required step because jobs should be connected to a real assessment resource, not a loose manual test.",
-      "The question bank comes from the available JSON resources (Questions Bank). Admins should select the question bank that matches the job.",
-      "Each question bank has differnt sections. Admin can any of them, every selected section must be configured before creating the assessment. Configuration: Section quantity, question counts, and timing must fit the actual question bank  limits.",
-      "Question quantities and timers can be updated from the assessment detail/configuration flow, but changes should stay inside the available JSON section data.",
-      "Use this page when a new role needs a fresh assessment profile or when an existing assessment needs section/time adjustments.",
+      "The question bank comes from the available JSON resources (Questions Bank) managed by IT Personal. Admins should select the question bank that matches the job.",
+      "Each question bank has different sections. Admin can use any of them, every selected section must be configured before creating the assessment. Configuration involves section quantity, question counts, and time per question in seconds.",
+      "Question quantities and timers can be updated from the assessment detail page at any time, but changes should stay inside the available JSON section data.",
+      "Use this page when a new Job role needs a fresh assessment profile or when an existing assessment needs questions quantity/time adjustments.",
     ],
   },
   {
@@ -76,7 +76,7 @@ const flowSteps: GuideStep[] = [
     details: [
       "A job controls the public role page: title, department, location, requirements, responsibilities, tags, and status.",
       "Select at least one assessment before creating the job so candidate invitations know which assessment flow to launch.",
-      "Open and Reopened jobs accept applications and invitations. Paused and Closed jobs preserve history but block new invite actions until reopened.",
+      "Job status Open and Reopened only accpets applications and invitations. Paused and Closed jobs preserve history but block new invite actions until reopened.",
       "Use the job configure page for edits. The job detail page should stay analytics-first for reviewing performance and candidate movement.",
     ],
   },
@@ -85,7 +85,7 @@ const flowSteps: GuideStep[] = [
     title: "Review candidate applications",
     shortTitle: "Application review",
     description:
-      "Review applications submitted from public jobs, open CV links, and decide whether the applicant should continue.",
+      "Review applications submitted from jobs, open CV links, and decide whether the applicant should be invited to attempt job assessment.",
     href: "/admin/candidate-applications",
     actionLabel: "Open applications",
     icon: ClipboardCheck,
